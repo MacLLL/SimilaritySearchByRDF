@@ -1,5 +1,5 @@
 *.DS_Store
 *.docx
 *.idea
+Test.scala
 target/
-project/
