@@ -1,0 +1,5 @@
+*.DS_Store
+*.docx
+target/
+project/
+src/test/resources
