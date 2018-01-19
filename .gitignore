@@ -1,5 +1,6 @@
 *.DS_Store
 *.docx
+*.idea
 target/
 project/
 src/test/resources
