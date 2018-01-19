@@ -3,3 +3,4 @@
 *.idea
 Test.scala
 target/
+project/
