@@ -7,6 +7,10 @@ import mclab.deploy.LSHServer;
 import mclab.lsh.DefaultHasher;
 import mclab.lsh.Hasher;
 import mclab.lsh.LocalitySensitiveHasher;
+import mclab.lsh.vector.SparseVector;
+import mclab.utils.Serializers;
+import scala.collection.mutable.StringBuilder;
+import mclab.deploy.HashTableInit;
 
 import java.io.*;
 import java.util.*;
@@ -1127,6 +1131,7 @@ public class RandomDrawTreeMap<K,V>
                     //we assume the minimum directory node size is 32
                     int bytePos = slot / 32;// the position in first BITMAP_SIZE(0-3)
                     int bitPos = slot % 32;// the position in BITMAP(0-31)
+                    //set to 1,means isSet
                     updatedDir[bytePos] = (updatedDir[bytePos] | (1 << bitPos));
                 } else {
                     //TODO assert slot bit was set
@@ -1171,12 +1176,584 @@ public class RandomDrawTreeMap<K,V>
         return dir_;
     }
 
+    /**
+     * remove the slot in dir
+     * @param dir
+     * @param slot
+     * @return
+     */
+    protected final Object dirRemove(Object dir, final int slot) {
+        int offset = dirOffsetFromSlot(dir, slot);
+        if (CC.ASSERT && offset <= 0) {
+            throw new DBException.DataCorruption("offset too low");
+        }
+
+        if (dir instanceof int[]) {
+            int[] dir_ = (int[]) dir;
+            //shrink and copy data
+            int[] dir2 = new int[dir_.length - 1];
+            System.arraycopy(dir_, 0, dir2, 0, offset);
+            System.arraycopy(dir_, offset + 1, dir2, offset, dir2.length - offset);
+
+            //unset bitmap bit
+            //TODO assert slot bit was set
+            int bytePos = slot / 32;
+            int bitPos = slot % 32;
+            dir2[bytePos] = (dir2[bytePos] & ~(1 << bitPos));
+            return dir2;
+        } else {
+            long[] dir_ = (long[]) dir;
+            //shrink and copy data
+            long[] dir2 = new long[dir_.length - 1];
+            System.arraycopy(dir_, 0, dir2, 0, offset);
+            System.arraycopy(dir_, offset + 1, dir2, offset, dir2.length - offset);
+
+            //unset bitmap bit
+            //TODO assert slot bit was set
+            int bytePos = slot / 64;
+            int bitPos = slot % 64;
+            dir2[bytePos] = (dir2[bytePos] & ~(1L << bitPos));
+            return dir2;
+        }
+    }
+
+    /**
+     * initialize the Store layer, for off-heap storage
+     * @param partitionId
+     * @param lockScale
+     * @return
+     */
+    private StoreSegment initPartitionInner(int partitionId, int lockScale) {
+        StoreSegment storeSegment = new StoreSegment(
+                "partition-" + partitionId, Volume.UNSAFE_VOL_FACTORY, null, lockScale, 0, false, false,
+                null, false, true, null);
+        storeSegment.serializer = LN_SERIALIZER;//Linked-List serializer
+        storeSegment.init();
+        return storeSegment;
+    }
+
+    /**
+     * init each partition's engine,rootrec and counter of each rec, every time ,it needs to use 8 long
+     * @param partitionId
+     */
+    private void initPartition(int partitionId) {
+        // to simulate the default mapdb setup
+        // all partition shares the same store with the lockscale of 16,
+        // since we only have 16 segments which is default setup in concurrentHashMap
+        StoreSegment store = initPartitionInner(partitionId, 16);
+        Long[] segIds = new Long[SEG];
+        for (int i = 0; i < SEG; i++) {
+            long partitionRoot = store.put(new int[BITMAP_SIZE], DIR_SERIALIZER);
+//      System.out.println("SegIds["+i+"]="+partitionRoot);
+            //partitionRootRec.put(partitionId, partitionRoot);
+            segIds[i] = partitionRoot;
+        }
+        //initialize counterRecId
+        Long[] counterRecIdArray = new Long[SEG];
+        for (int i = 0; i < SEG; i++) {
+            long counterRecId = store.put(0L, Serializer.LONG);
+//      System.out.println("initial counterRecId:" + counterRecId);
+            counterRecIdArray[i] = counterRecId;
+        }
+        //each partition is the same, it's the big bug!!
+//    for (int pId = 0; pId < partitioner.numPartitions; pId++) {
+//      engines.put(pId, store);
+//      partitionRootRec.put(pId, segIds);
+//      counterRecids.put(pId, counterRecIdArray);
+//    }
+        engines.put(partitionId,store);
+        partitionRootRec.put(partitionId,segIds);
+        counterRecids.put(partitionId,counterRecIdArray);
+    }
+
+    protected String buildStorageName(int partitionId, int segId) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("partition-" + partitionId + "-" + segId);
+        return sb.toString();
+    }
+
+    protected void initPartitionIfNecessary(int partitionId) {
+        // simulate default mapdb
+        try {
+            initStorageLock.writeLock().lock();
+            if (!defaultMapDBInitialized[partitionId]) {
+                initPartition(partitionId);
+                ReentrantReadWriteLock[] ramLockArray = new ReentrantReadWriteLock[SEG];
+                ReentrantReadWriteLock[] persistLockArray = new ReentrantReadWriteLock[SEG];
+                for (int i = 0; i < SEG; i++) {
+                    ramLockArray[i] = new ReentrantReadWriteLock();
+                    persistLockArray[i] = new ReentrantReadWriteLock();
+                }
+                //only when each partition is going to be used, we initialize it.
+                partitionRamLock.put(partitionId,ramLockArray);
+                partitionPersistLock.put(partitionId,persistLockArray);
+                defaultMapDBInitialized[partitionId] = true;
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            initStorageLock.writeLock().unlock();
+        }
+    }
+
+    /***
+     * calculate the hash value, which is depended on the HashName
+     * @param key
+     * @return
+     */
+
+    public int hash(final K key) {
+        if (hasher instanceof LocalitySensitiveHasher) {
+            // the hasher is the locality sensitive hasher, where we need to calculate the hash of the
+            // vector instead of the key value
+                SparseVector v = HashTableInit.vectorIdToVector().get(key);
+                if (v == null) {
+                    System.out.println("fetch vector " + key + ", but got NULL");
+                    System.exit(1);
+                }
+                return hasher.hash(v, Serializers.VectorSerializer());
+            }
+        } else {
+            // the hasher is the default hasher which calculates the hash based on the key directly
+            return hasher.hash(key, keySerializer);
+        }
+    }
+
+    /***
+     * For multi feature when test dataset CC_WEB_VIDEO
+     * @param key
+     * @param flag
+     * @return
+     */
+
+    public int hash(final K key,int flag) {
+        if (hasher instanceof LocalitySensitiveHasher) {
+            // the hasher is the locality sensitive hasher, where we need to calculate the hash of the
+            // vector instead of the key value
+            SparseVector v=null;
+            if(flag==1){
+                v = HashTableInit.vectorIdToVector_blue().get(key);
+            }else if(flag==2){
+                v = HashTableInit.vectorIdToVector_green().get(key);
+            }else if(flag==3){
+                v = HashTableInit.vectorIdToVector_red().get(key);
+            }
+            if (v == null) {
+                System.out.println("fetch vector " + key + ", but got NULL");
+                System.exit(1);
+            }
+            return hasher.hash(v, Serializers.VectorSerializer());
+//      }
+        } else {
+            // the hasher is the default hasher which calculates the hash based on the key directly
+            return hasher.hash(key, keySerializer);
+        }
+    }
+
+    @Override
+    public V put(final K key, final V value) {
+        if (key == null)
+            throw new IllegalArgumentException("null key");
+
+        if (value == null)
+            throw new IllegalArgumentException("null value");
+
+        V ret;
+        final int h = hash(key);
+        final int seg = h >>> BUCKET_LENGTH;
+        final int partition = partitioner.getPartition(
+                (K) (hasher instanceof LocalitySensitiveHasher ? h : key));
+        initPartitionIfNecessary(partition);
+        try {
+            partitionRamLock.get(partition)[seg].writeLock().lock();
+            ret = putInner(key, value, h, partition);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        } finally {
+            partitionRamLock.get(partition)[seg].writeLock().unlock();
+        }
+
+        return value;
+    }
+
+    /***
+     * for multi feature
+     * @param key
+     * @param value
+     * @param flag
+     * @return
+     */
+    public V put(final K key, final V value,int flag) {
+        if (key == null)
+            throw new IllegalArgumentException("null key");
+
+        if (value == null)
+            throw new IllegalArgumentException("null value");
+
+        V ret;
+        final int h = hash(key,flag);
+        final int seg = h >>> BUCKET_LENGTH;
+        final int partition = partitioner.getPartition(
+                (K) (hasher instanceof LocalitySensitiveHasher ? h : key));
+        initPartitionIfNecessary(partition);
+//    if(hasher instanceof LocalitySensitiveHasher){
+//      times[partition]++;
+////      System.out.println("times =" + times[partition] +" Put the key:" + key+" and value:"+value+" in partition:" + partition);
+//    }
+        try {
+            partitionRamLock.get(partition)[seg].writeLock().lock();
+            ret = putInner(key, value, h, partition);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        } finally {
+            partitionRamLock.get(partition)[seg].writeLock().unlock();
+        }
+
+        return value;
+    }
+
+    /**
+     * update the kv pair in the segment
+     *
+     * @param key       key
+     * @param value     value
+     * @param h         hashcode of kv pair
+     * @param partition the target sub-index
+     * @return null if the corresponding kv pair doesn't exist, otherwise return the existing value
+     */
+    protected V putInner(K key, V value, int h, int partition) {
+        int seg = h>>> BUCKET_LENGTH;
+        long dirRecid = partitionRootRec.get(partition)[seg];
+        Engine engine = engines.get(partition);
+
+        int level = MAX_TREE_LEVEL;
+        while (true) {
+            Object dir = engine.get(dirRecid, DIR_SERIALIZER);
+            //every NUM_BITS_PER_COMPARISON bits present the slot ID of the record
+            final int slot = (h >>> (NUM_BITS_PER_COMPARISON * level)) & BITS_COMPARISON_MASK;
+
+            if (CC.ASSERT && (slot > DIRECTORY_NODE_SIZE - 1))
+                throw new DBException.DataCorruption("slot too high");
+            if (dir == null) {
+                //create new dir
+                dir = new int[BITMAP_SIZE]; //16 bytes, 128 bits
+            }
+            //dirOffset - the offset with in a dir
+            final int dirOffset = dirOffsetFromSlot(dir, slot);
+            int bucketConflictCost = 0; // the threshold number of objects in this level
+            long recid = dirOffset < 0 ? 0 : dirGet(dir,dirOffset);
+            if (recid != 0) {
+                //the record id has existed
+                if ((recid & 1) == 0) {
+                    //this is the d-node
+                    dirRecid = recid >>> 1;
+                    level--;
+                    continue;
+                }
+                recid = recid >>> 1;
+
+                //traverse linked list, try to replace previous value
+                LinkedNode<K, V> ln = engine.get(recid, LN_SERIALIZER);
+
+                while (ln != null) {
+                    if (keySerializer.equals(ln.key, key)) {
+                        //if found, replace value at this node
+                        V oldVal = ln.value;
+                        ln = new LinkedNode<K, V>(ln.next, ln.key, value);
+                        if (CC.ASSERT && ln.next == recid)
+                            throw new DBException.DataCorruption("cyclic reference in linked list");
+                        engine.update(recid, ln, LN_SERIALIZER);
+                        return oldVal;
+                    }
+                    recid = ln.next; // for traverse linked list
+                    ln = ((recid == 0) ? null : engine.get(recid, LN_SERIALIZER));
+                    if (CC.ASSERT && ln != null && ln.next == recid)
+                        throw new DBException.DataCorruption("cyclic reference in linked list");
+                    bucketConflictCost++;
+                    if (CC.ASSERT && bucketConflictCost > 1024 * 1024)
+                        throw new DBException.DataCorruption("linked list too large");
+                }
+                //key was not found at linked list, so just append it to beginning
+            }
+
+            //there is no such a null value
+            //check if linked list has overflow and needs to be expanded to new dir level
+            if (bucketConflictCost >= BUCKET_OVERFLOW && level >= 1) {
+                Object newDirNode = new int[BITMAP_SIZE];
+                {
+                    //Generate the new linkedNode
+                    final LinkedNode<K, V> node = new LinkedNode<K, V>(0, key, value);
+                    //put the linkedNode to node and get the assigned record id
+                    final long newRecid = engine.put(node, LN_SERIALIZER);
+                    if (CC.ASSERT && newRecid == node.next)
+                        throw new DBException.DataCorruption("cyclic reference in linked list");
+                    //add newly inserted record
+                    //find the position of the node in the directory node in next level
+                    final int pos = (h >>> (NUM_BITS_PER_COMPARISON * (level - 1))) & BITS_COMPARISON_MASK;
+                    //update the dir node with the new LinkedNode,
+                    // make the last bit as 0 to indicate the d-node
+//          newDirNode = putNewRecordIdInDir(newDirNode, pos, (newRecid << 1) | 1);
+                    newDirNode = putNewRecordIdInDir(newDirNode, pos, newRecid << 1);
+                }
+
+                //redistribute linked bucket into new dir
+                //traverse all linked node under the same slot and put it in the new directory node
+                //in the next level
+                long nodeRecid = dirOffset < 0 ? 0 : dirGet(dir, dirOffset) >>> 1;
+                while (nodeRecid != 0) {
+                    //get the node
+                    LinkedNode<K, V> n = engine.get(nodeRecid, LN_SERIALIZER);
+                    //calculate the position in next level
+                    final int pos = (hash(n.key) >>> (NUM_BITS_PER_COMPARISON * (level - 1))) &
+                            BITS_COMPARISON_MASK;
+                    //get the recid in newDirNode by slot
+                    final long recid2 = dirGetSlot(newDirNode, pos);
+                    n = new LinkedNode<K, V>(recid2 >>> 1, n.key, n.value);
+                    //put in the new record node, since it's a k-node, set the last bit as 1
+                    newDirNode = putNewRecordIdInDir(newDirNode, pos, (nodeRecid << 1) | 1);
+                    engine.update(nodeRecid, n, LN_SERIALIZER);
+                    if (CC.ASSERT && nodeRecid == n.next)
+                        throw new DBException.DataCorruption("cyclic reference in linked list");
+                    final long nextRecid = n.next;
+                    nodeRecid = nextRecid;
+                }
+
+                //insert nextDir and update parent dir
+                long nextDirRecid = engine.put(newDirNode, DIR_SERIALIZER);
+                int parentPos = (h >>> (NUM_BITS_PER_COMPARISON * level)) & BITS_COMPARISON_MASK;
+                //update the parent directory node
+                dir = putNewRecordIdInDir(dir, parentPos, nextDirRecid << 1);
+                engine.update(dirRecid, dir, DIR_SERIALIZER);
+                //update counter
+                counter(partition, seg, engine, +1);
+                return null;
+            } else {
+                //Nan Zhu:
+                // record does not exist in linked list and the linked list hasn't overflow,
+                // so create new one
+                recid = dirOffset < 0 ? 0 : dirGet(dir, dirOffset) >>> 1;
+                //insert at the head of the linked list
+                //the recid/2 === the first record under this slot
+                //because the last bit label the type of node, and here we know it's a k-node
+                final long newRecid = engine.put(
+                        new LinkedNode<K, V>(recid, key, value),
+                        LN_SERIALIZER);
+                if (CC.ASSERT && newRecid == recid) {
+                    throw new DBException.DataCorruption("cyclic reference in linked list");
+                }
+
+                dir = putNewRecordIdInDir(dir, slot, (newRecid << 1) | 1);
+                engine.update(dirRecid, dir, DIR_SERIALIZER);
+                //update counter
+                counter(partition, seg, engine, +1);
+                return null;
+            }
+        }
+    }
+
+    /**
+     * count the number in each seg of sub-index
+     * @param partition
+     * @param seg
+     * @param engine
+     * @param plus
+     */
+    protected void counter(int partition, int seg,  Engine engine, int plus) {
+        if (counterRecids == null) {
+            return;
+        }
+
+        long oldCounter = engine.get(counterRecids.get(partition)[seg], Serializer.LONG);
+        oldCounter += plus;
+        engine.update(counterRecids.get(partition)[seg], oldCounter, Serializer.LONG);
+    }
+
+    /**
+     * remove the object in index
+     * @param key
+     * @return
+     */
+    @Override
+    public V remove(Object key) {
+        V ret;
+
+        final int h = hash((K) key);
+        final int seg = h >>> BUCKET_LENGTH;
+        final int partition = partitioner.getPartition((K) key);
+        try {
+            partitionRamLock.get(partition)[seg].writeLock().lock();
+            ret = removeInternal(key, partition, h);
+        } finally {
+            partitionRamLock.get(partition)[seg].writeLock().unlock();
+        }
+        return ret;
+    }
+
+    protected V removeInternal(Object key, int partition, int h) {
+        Engine engine = engines.get(partition);
+        int seg = h >>> BUCKET_LENGTH;
+        final long[] dirRecids = new long[4];
+        int level = 3;
+        dirRecids[level] = partitionRootRec.get(partition)[seg];
+
+        while (true) {
+            Object dir = engine.get(dirRecids[level], DIR_SERIALIZER);
+            final int slot = (h >>> (7 * level)) & 0x7F;
+            if (CC.ASSERT && slot > 127)
+                throw new DBException.DataCorruption("slot too high");
+
+            if (dir == null) {
+                //create new dir
+                dir = new int[4];
+            }
+
+            long recid = dirGetSlot(dir, slot);
+
+            if (recid != 0) {
+                if ((recid & 1) == 0) {
+                    level--;
+                    dirRecids[level] = recid >>> 1;
+                    continue;
+                }
+                recid = recid >>> 1;
+
+                //traverse linked list, try to remove node
+                LinkedNode<K, V> ln = engine.get(recid, LN_SERIALIZER);
+                LinkedNode<K, V> prevLn = null;
+                long prevRecid = 0;
+                while (ln != null) {
+                    if (keySerializer.equals(ln.key, (K) key)) {
+                        //remove from linkedList
+                        if (prevLn == null) {
+                            //referenced directly from dir
+                            if (ln.next == 0) {
+                                recursiveDirDelete(engine, h, level, dirRecids, dir, slot);
 
 
+                            } else {
+                                dir = putNewRecordIdInDir(dir, slot, (ln.next << 1) | 1);
+                                engine.update(dirRecids[level], dir, DIR_SERIALIZER);
+                            }
 
+                        } else {
+                            //referenced from LinkedNode
+                            prevLn = new LinkedNode<K, V>(ln.next, prevLn.key, prevLn.value);
+                            engine.update(prevRecid, prevLn, LN_SERIALIZER);
+                            if (CC.ASSERT && prevRecid == prevLn.next)
+                                throw new DBException.DataCorruption("cyclic reference in linked list");
+                        }
+                        //found, remove this node
+                        if (CC.ASSERT && !(hash(ln.key) == h))
+                            throw new DBException.DataCorruption("inconsistent hash");
+                        engine.delete(recid, LN_SERIALIZER);
+                        counter(partition, seg, engine, -1);
+                        return ln.value;
+                    }
+                    prevRecid = recid;
+                    prevLn = ln;
+                    recid = ln.next;
+                    ln = recid == 0 ? null : engine.get(recid, LN_SERIALIZER);
+//                        counter++;
+                }
+                //key was not found at linked list, so it does not exist
+                return null;
+            }
+            //recid is 0, so entry does not exist
+            return null;
 
+        }
+    }
 
+    private void recursiveDirDelete(Engine engine, int h, int level, long[] dirRecids, Object dir,
+                                    int slot) {
+        //was only item in linked list, so try to collapse the dir
+        dir = dirRemove(dir, slot);
 
+        if (dirIsEmpty(dir)) {
+            //delete from parent dir
+            if (level == 3) {
+                //parent is segment, recid of this dir can not be modified,  so just update to null
+                engine.update(dirRecids[level], new int[4], DIR_SERIALIZER);
+            } else {
+                engine.delete(dirRecids[level], DIR_SERIALIZER);
+
+                final Object parentDir = engine.get(dirRecids[level + 1], DIR_SERIALIZER);
+                final int parentPos = (h >>> (7 * (level + 1))) & 0x7F;
+                recursiveDirDelete(engine, h, level + 1, dirRecids, parentDir, parentPos);
+                //parentDir[parentPos>>>DIV8][parentPos&MOD8] = 0;
+                //engine.update(dirRecids[level + 1],parentDir,DIR_SERIALIZER);
+
+            }
+        } else {
+            engine.update(dirRecids[level], dir, DIR_SERIALIZER);
+        }
+    }
+
+    @Override
+    public void clear() {
+        Iterator<Integer> partitionIds = partitionRamLock.keySet().iterator();
+        while (partitionIds.hasNext()) {
+            int partitionId = partitionIds.next();
+            for (int segId = 0; segId < SEG; segId++) {
+                partitionRamLock.get(partitionId)[segId].writeLock().lock();
+                try {
+                    Engine engine = engines.get(partitionId);
+
+                    if (counterRecids != null) {
+                        engine.update(counterRecids.get(partitionId)[segId], 0L, Serializer.LONG);
+                    }
+
+                    Long[] dirRecs = partitionRootRec.get(partitionId);
+                    for (int i = 0; i < dirRecs.length; i++) {
+                        final long dirRecid = dirRecs[i];
+                        recursiveDirClear(engine, dirRecid);
+                        //set dir to null, as segment recid is immutable
+                        engine.update(dirRecid, new int[BITMAP_SIZE], DIR_SERIALIZER);
+                    }
+
+                } finally {
+                    partitionRamLock.get(partitionId)[segId].writeLock().unlock();
+                }
+            }
+        }
+    }
+
+    private void recursiveDirClear(Engine engine, final long dirRecid) {
+        final Object dir = engine.get(dirRecid, DIR_SERIALIZER);
+        if (dir == null)
+            return;
+        int dirlen = dirLen(dir);
+        for (int offset = dirStart(dir); offset < dirlen; offset++) {
+            long recid = dirGet(dir, offset);
+            if ((recid & 1) == 0) {
+                //another dir
+                recid = recid >>> 1;
+                //recursively remove dir
+                recursiveDirClear(engine, recid);
+                engine.delete(recid, DIR_SERIALIZER);
+            } else {
+                //linked list to delete
+                recid = recid >>> 1;
+                while (recid != 0) {
+                    LinkedNode n = engine.get(recid, LN_SERIALIZER);
+                    if (CC.ASSERT && n.next == recid)
+                        throw new DBException.DataCorruption("cyclic reference in linked list");
+                    engine.delete(recid, LN_SERIALIZER);
+                    recid = n.next;
+                }
+            }
+        }
+    }
+
+    @Override
+    public boolean containsValue(Object value) {
+        for (V v : values()) {
+            if (valueSerializer.equals(v, (V) value)) return true;
+        }
+        return false;
+    }
 
 
 }
