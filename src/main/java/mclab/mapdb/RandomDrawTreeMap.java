@@ -1,6 +1,7 @@
 package mclab.mapdb;
 
 
+import breeze.stats.distributions.Rand;
 import com.google.common.hash.BloomFilter;
 import com.google.common.hash.Funnels;
 import mclab.deploy.LSHServer;
@@ -23,9 +24,11 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.logging.Logger;
 
 @SuppressWarnings({ "unchecked", "rawtypes" })
-public class RandomDrawTreeMap<K,V>
-        extends AbstractMap<K,V>
-        implements ConcurrentMap<K,V>,Closeable {
+public class RandomDrawTreeMap<K, V>
+        extends AbstractMap<K, V>
+        implements ConcurrentMap<K, V>,
+        Closeable {
+
     protected static final Logger LOG = Logger.getLogger(HTreeMap.class.getName());
 
     /**
@@ -435,54 +438,6 @@ public class RandomDrawTreeMap<K,V>
     }
 
     //Until here, the table initialization is finished
-
-    @Override
-    public boolean containsKey(final Object o) {
-        return getPeek(o) != null;
-    }
-
-    /**
-     * Return given value, without updating cache statistics if {@code expireAccess()} is true
-     * It also does not use {@code valueCreator} if value is not found (always returns null if not found)
-     *
-     * @param key key to lookup
-     * @return value associated with key or null
-     */
-    public V getPeek(final Object key) {
-        if (key == null) return null;
-        final int h = hash((K) key);
-        final int seg = h >>> BUCKET_LENGTH;
-        final int partition = partitioner.getPartition((K) key);
-
-        V ret;
-        //search ram
-        try {
-            final Lock ramLock = partitionRamLock.get(partition)[seg].readLock();
-            RandomDrawTreeMap.LinkedNode<K, V> ln = null;
-            try {
-                ramLock.lock();
-                ln = getInner(key, seg, h, partition);
-            } finally {
-                ramLock.unlock();
-            }
-
-            if (ln == null && persistedStorages.containsKey(partition)) {
-                final Lock persistLock = partitionPersistLock.get(partition)[seg].readLock();
-                try {
-                    persistLock.lock();
-                    ln = fetchFromPersistedStorage(key, partition,
-                            partitionRootRec.get(partition)[seg], h);
-
-                } finally {
-                    persistLock.unlock();
-                }
-            }
-            ret = ln == null ? null : ln.value;
-        } catch (NullPointerException npe) {
-            return null;
-        }
-        return ret;
-    }
 
     @Override
     public int size() {
@@ -1306,13 +1261,12 @@ public class RandomDrawTreeMap<K,V>
         if (hasher instanceof LocalitySensitiveHasher) {
             // the hasher is the locality sensitive hasher, where we need to calculate the hash of the
             // vector instead of the key value
-                SparseVector v = HashTableInit.vectorIdToVector().get(key);
-                if (v == null) {
-                    System.out.println("fetch vector " + key + ", but got NULL");
-                    System.exit(1);
-                }
-                return hasher.hash(v, Serializers.VectorSerializer());
+            SparseVector v = HashTableInit.vectorIdToVector().get(key);
+            if (v == null) {
+                System.out.println("fetch vector " + key + ", but got NULL");
+                System.exit(1);
             }
+            return hasher.hash(v, Serializers.VectorSerializer());
         } else {
             // the hasher is the default hasher which calculates the hash based on the key directly
             return hasher.hash(key, keySerializer);
@@ -1373,7 +1327,6 @@ public class RandomDrawTreeMap<K,V>
         } finally {
             partitionRamLock.get(partition)[seg].writeLock().unlock();
         }
-
         return value;
     }
 
@@ -1754,6 +1707,670 @@ public class RandomDrawTreeMap<K,V>
         }
         return false;
     }
+
+    @Override
+    public boolean containsKey(final Object o) {
+        return getPeek(o) != null;
+    }
+
+    /**
+     * Return given value, without updating cache statistics if {@code expireAccess()} is true
+     * It also does not use {@code valueCreator} if value is not found (always returns null if not found)
+     *
+     * @param key key to lookup
+     * @return value associated with key or null
+     */
+    public V getPeek(final Object key) {
+        if (key == null) return null;
+        final int h = hash((K) key);
+        final int seg = h >>> BUCKET_LENGTH;
+        final int partition = partitioner.getPartition((K) key);
+
+        V ret;
+        //search ram
+        try {
+            final Lock ramLock = partitionRamLock.get(partition)[seg].readLock();
+            RandomDrawTreeMap.LinkedNode<K, V> ln = null;
+            try {
+                ramLock.lock();
+                ln = getInner(key, seg, h, partition);
+            } finally {
+                ramLock.unlock();
+            }
+
+            if (ln == null && persistedStorages.containsKey(partition)) {
+                final Lock persistLock = partitionPersistLock.get(partition)[seg].readLock();
+                try {
+                    persistLock.lock();
+                    ln = fetchFromPersistedStorage(key, partition,
+                            partitionRootRec.get(partition)[seg], h);
+
+                } finally {
+                    persistLock.unlock();
+                }
+            }
+            ret = ln == null ? null : ln.value;
+        } catch (NullPointerException npe) {
+            return null;
+        }
+        return ret;
+    }
+
+
+    /**
+     * implement the class EntrySet of map
+     */
+    protected class EntrySet extends AbstractSet<Entry<K, V>> {
+
+        private int partitionId = 0;
+
+        public EntrySet(int partition) {
+            this.partitionId = partition;
+        }
+
+        @Override
+        public int size() {
+            return RandomDrawTreeMap.this.size();
+        }
+
+        @Override
+        public boolean isEmpty() {
+            return RandomDrawTreeMap.this.isEmpty();
+        }
+
+        @Override
+        public boolean contains(Object o) {
+            if (o instanceof Entry) {
+                Entry e = (Entry) o;
+                Object val = RandomDrawTreeMap.this.get(e.getKey());
+                return val != null && valueSerializer.equals((V) val, (V) e.getValue());
+            } else
+                return false;
+        }
+
+        @Override
+        public Iterator<Entry<K, V>> iterator() {
+            return new EntryIterator(partitionId);
+        }
+
+        @Override
+        public boolean add(Entry<K, V> kvEntry) {
+            K key = kvEntry.getKey();
+            V value = kvEntry.getValue();
+            if (key == null || value == null) throw new NullPointerException();
+            RandomDrawTreeMap.this.put(key, value);
+            return true;
+        }
+
+        @Override
+        public boolean remove(Object o) {
+            if (o instanceof Entry) {
+                Entry e = (Entry) o;
+                Object key = e.getKey();
+                if (key == null) return false;
+                return RandomDrawTreeMap.this.remove(key, e.getValue());
+            }
+            return false;
+        }
+
+
+        @Override
+        public void clear() {
+            RandomDrawTreeMap.this.clear();
+        }
+    }
+
+    /**
+     * implement the class ValueSet of map
+     */
+    protected class ValueSet extends AbstractCollection<V> {
+
+        private int partitionId = 0;
+
+        public ValueSet(int partitionId) {
+            this.partitionId = partitionId;
+        }
+
+        @Override
+        public int size() {
+            return RandomDrawTreeMap.this.size();
+        }
+
+        @Override
+        public boolean isEmpty() {
+            return RandomDrawTreeMap.this.isEmpty();
+        }
+
+        @Override
+        public boolean contains(Object o) {
+            return RandomDrawTreeMap.this.containsValue(o);
+        }
+
+        @Override
+        public Iterator<V> iterator() {
+            return new ValueIterator(partitionId);
+        }
+    }
+
+    protected class KeySet extends AbstractSet<K> implements Closeable {
+
+        private int partitionId = 0;
+
+        public KeySet(int partitionId) {
+            this.partitionId = partitionId;
+        }
+
+        @Override
+        public int size() {
+            return RandomDrawTreeMap.this.size();
+        }
+
+        @Override
+        public boolean isEmpty() {
+            return RandomDrawTreeMap.this.isEmpty();
+        }
+
+        @Override
+        public boolean contains(Object o) {
+            return RandomDrawTreeMap.this.containsKey(o);
+        }
+
+        @Override
+        public Iterator<K> iterator() {
+            return new KeyIterator(partitionId);
+        }
+
+        @Override
+        public boolean add(K k) {
+            if (RandomDrawTreeMap.this.hasValues) {
+                throw new UnsupportedOperationException();
+            } else {
+                return RandomDrawTreeMap.this.put(k, (V) Boolean.TRUE) == null;
+            }
+        }
+
+        @Override
+        public boolean remove(Object o) {
+            return RandomDrawTreeMap.this.remove(o) != null;
+        }
+
+
+        @Override
+        public void clear() {
+            RandomDrawTreeMap.this.clear();
+        }
+
+        public RandomDrawTreeMap<K, V> parent() {
+            return RandomDrawTreeMap.this;
+        }
+
+        @Override
+        public int hashCode() {
+            int result = 0;
+            for (K k : this) {
+                result += keySerializer.hashCode(k);
+            }
+            return result;
+
+        }
+
+        @Override
+        public void close() {
+            RandomDrawTreeMap.this.close();
+        }
+
+        public RandomDrawTreeMap getRandomDrawTreeMap() {
+            return RandomDrawTreeMap.this;
+        }
+    }
+
+    private HashMap<Integer, KeySet> _keySets = new HashMap<Integer, KeySet>();
+
+    @Override
+    public Set<K> keySet() {
+        throw new UnsupportedOperationException("you have to indicate partitionId for getting keySet");
+    }
+
+    public Set<K> keySet(int partitionId) {
+        if (!_keySets.containsKey(partitionId)) {
+            _keySets.put(partitionId, new KeySet(partitionId));
+        }
+        return _keySets.get(partitionId);
+    }
+
+    public Collection<V> values() {
+        throw new UnsupportedOperationException("you have to specify the partition ID");
+    }
+
+    private final HashMap<Integer, ValueSet> _values = new HashMap<Integer, ValueSet>();
+
+    public ValueSet values(int partitionId) {
+        if (!_values.containsKey(partitionId)) {
+            _values.put(partitionId, new ValueSet(partitionId));
+        }
+        return _values.get(partitionId);
+    }
+
+    private final HashMap<Integer, EntrySet> _entrySet = new HashMap<>();
+
+    @Override
+    public Set<Entry<K, V>> entrySet() {
+        throw new UnsupportedOperationException("you have to specify the partition ID");
+    }
+
+    public EntrySet entrySet(int partitionId) {
+        if (!_entrySet.containsKey(partitionId)) {
+            _entrySet.put(partitionId, new EntrySet(partitionId));
+        }
+        return _entrySet.get(partitionId);
+    }
+
+
+
+
+
+    abstract class HashIterator {
+
+        protected LinkedNode[] currentLinkedList;
+        protected int currentLinkedListPos = 0;
+
+        private K lastReturnedKey = null;
+
+        protected int partition = 0;
+
+        private int lastSegment = 0;
+
+        HashIterator(int partition) {
+            this.partition = partition;
+            currentLinkedList = findNextLinkedNode(0);
+        }
+
+        public void remove() {
+            final K keyToRemove = lastReturnedKey;
+            if (lastReturnedKey == null)
+                throw new IllegalStateException();
+
+            lastReturnedKey = null;
+            RandomDrawTreeMap.this.remove(keyToRemove);
+        }
+
+        public boolean hasNext() {
+            return currentLinkedList != null && currentLinkedListPos < currentLinkedList.length;
+        }
+
+        protected void moveToNext() {
+            lastReturnedKey = (K) currentLinkedList[currentLinkedListPos].key;
+
+            currentLinkedListPos += 1;
+            if (currentLinkedListPos == currentLinkedList.length) {
+                final int lastHash = hash(lastReturnedKey);
+                currentLinkedList = advance(lastHash);
+                currentLinkedListPos = 0;
+            }
+        }
+
+        private LinkedNode[] advance(int lastHash) {
+            int segment = lastHash >>> BUCKET_LENGTH;
+            int partitionId = partition;
+            Engine engine = engines.get(partitionId);
+            //two phases, first find old item and increase hash
+            Lock lock = partitionRamLock.get(partitionId)[segment].readLock();
+            lock.lock();
+            long recId;
+            try {
+                long dirRecid = partitionRootRec.get(partitionId)[segment];
+                int level = MAX_TREE_LEVEL;
+                //dive into tree, finding last hash position
+                while (true) {
+                    Object dir = engine.get(dirRecid, DIR_SERIALIZER);
+                    //check if we need to expand deeper
+                    recId = dirGetSlot(dir, (lastHash >>> (NUM_BITS_PER_COMPARISON * level)) & BITS_COMPARISON_MASK);
+                    if (recId == 0 || (recId & 1) == 1) {
+                        //increase hash by 1
+                        if (level != 0) {
+                            //down to the next level and plus 1
+                            lastHash = ((lastHash >>> (NUM_BITS_PER_COMPARISON * level)) + 1) << (NUM_BITS_PER_COMPARISON * level); //should use mask and XOR
+                        } else {
+                            //last level, just increase by 1
+                            lastHash += 1;
+                        }
+                        if (lastHash == 0) {
+                            return null;
+                        }
+                        break;
+                    }
+                    //reference is dir, move to next level
+                    dirRecid = recId >> 1;
+                    level--;
+                }
+            } finally {
+                lock.unlock();
+            }
+            return findNextLinkedNode(lastHash);
+        }
+
+        private LinkedNode[] findNextLinkedNode(int hash) {
+            //second phase, start search from increased hash to find next items
+            for (int segment = Math.max(hash >>> BUCKET_LENGTH, lastSegment); segment < SEG; segment++) {
+                Engine engine = engines.get(partition);
+                if (partitionRamLock.containsKey(partition)) {
+                    final Lock lock = partitionRamLock.get(partition)[segment].readLock();
+                    try {
+                        lock.lock();
+                        lastSegment = Math.max(segment, lastSegment);
+                        long dirRecid = partitionRootRec.get(partition)[segment];
+                        LinkedNode ret[] = findNextLinkedNodeRecur(engine, dirRecid, hash, MAX_TREE_LEVEL);
+                        if (ret != null) {
+                            return ret;
+                        }
+                        hash = 0;
+                    } finally {
+                        lock.unlock();
+                    }
+                }
+            }
+            return null;
+        }
+        private LinkedNode[] findNextLinkedNodeRecur(
+                Engine engine,
+                long dirRecid,
+                int newHash,
+                int level) {
+            final Object dir = engine.get(dirRecid, DIR_SERIALIZER);
+            if (dir == null)
+                return null;
+            int offset = Math.abs(dirOffsetFromSlot(dir, (newHash >>> (level * NUM_BITS_PER_COMPARISON)) & BITS_COMPARISON_MASK));
+
+            boolean first = true;
+            int dirlen = dirLen(dir);
+            while (offset < dirlen) {
+                long recid = offset < 0 ? 0 : dirGet(dir, offset);
+                if (recid != 0) {
+                    if ((recid & 1) == 1) {
+                        recid = recid >> 1;
+                        //found linked list, load it into array and return
+                        LinkedNode[] array = new LinkedNode[1];
+                        int arrayPos = 0;
+                        while (recid != 0) {
+                            LinkedNode ln = engine.get(recid, LN_SERIALIZER);
+                            if (ln == null) {
+                                break;
+                            }
+                            //increase array size if needed
+                            if (arrayPos == array.length) {
+                                array = Arrays.copyOf(array, array.length + 1);
+                            }
+                            array[arrayPos++] = ln;
+                            recid = ln.next;
+                        }
+                        return array;
+                    } else {
+                        //found another dir, continue dive
+                        recid = recid >> 1;
+                        LinkedNode[] ret = findNextLinkedNodeRecur(engine, recid, first ? newHash : 0,
+                                level - 1);
+                        if (ret != null) return ret;
+                    }
+                }
+                first = false;
+                offset += 1;
+            }
+            return null;
+        }
+    }
+
+    class KeyIterator extends HashIterator implements Iterator<K> {
+
+        public KeyIterator(int partitionId) {
+            super(partitionId);
+        }
+
+        @Override
+        public K next() {
+            if (currentLinkedList == null) {
+                throw new NoSuchElementException();
+            }
+            K key = (K) currentLinkedList[currentLinkedListPos].key;
+            moveToNext();
+            return key;
+        }
+    }
+
+    class ValueIterator extends HashIterator implements Iterator<V> {
+
+        public ValueIterator(int partitionId) {
+            super(partitionId);
+        }
+
+        @Override
+        public V next() {
+            if (currentLinkedList == null)
+                throw new NoSuchElementException();
+            V value = (V) currentLinkedList[currentLinkedListPos].value;
+            moveToNext();
+            return value;
+        }
+    }
+
+    class EntryIterator extends HashIterator implements Iterator<Entry<K, V>> {
+
+        public EntryIterator(int partitionId) {
+            super(partitionId);
+        }
+
+        @Override
+        public Entry<K, V> next() {
+            if (currentLinkedList == null) {
+                throw new NoSuchElementException();
+            }
+            K key = (K) currentLinkedList[currentLinkedListPos].key;
+            moveToNext();
+            return new Entry2(key);
+        }
+    }
+
+    class Entry2 implements Entry<K, V> {
+
+        private final K key;
+
+        Entry2(K key) {
+            this.key = key;
+        }
+
+        @Override
+        public K getKey() {
+            return key;
+        }
+
+        @Override
+        public V getValue() {
+            return RandomDrawTreeMap.this.get(key);
+        }
+
+        @Override
+        public V setValue(V value) {
+            return RandomDrawTreeMap.this.put(key, value);
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            return (o instanceof Entry) && keySerializer.equals(key, (K) ((Entry) o).getKey());
+        }
+
+        @Override
+        public int hashCode() {
+            final V value = RandomDrawTreeMap.this.get(key);
+            return (key == null ? 0 : keySerializer.hashCode(key)) ^
+                    (value == null ? 0 : value.hashCode());
+        }
+    }
+
+    /**
+     * put the kv pair if it does not exist in the map
+     * @param key
+     * @param value
+     * @return
+     */
+    @Override
+    public V putIfAbsent(K key, V value) {
+        if (key == null || value == null) throw new NullPointerException();
+
+        final int h = hash(key);
+        final int seg = h >>> BUCKET_LENGTH;
+        final int partition = partitioner.getPartition(key);
+
+        V ret;
+
+        try {
+            partitionRamLock.get(partition)[seg].writeLock().lock();
+            LinkedNode<K, V> ln = RandomDrawTreeMap.this.getInner(key, seg, h, partition);
+            if (ln == null)
+                ret = put(key, value);
+            else
+                ret = ln.value;
+
+        } finally {
+            partitionRamLock.get(partition)[seg].writeLock().unlock();
+        }
+        return ret;
+    }
+
+    @Override
+    public boolean remove(Object key, Object value) {
+        if (key == null || value == null)
+            throw new NullPointerException();
+
+        boolean ret;
+
+        final int h = hash((K) key);
+        final int seg = h >>> BUCKET_LENGTH;
+        final int partition = partitioner.getPartition((K) key);
+
+        try {
+            partitionRamLock.get(partition)[seg].writeLock().lock();
+            LinkedNode otherVal = getInner(key, seg, h, partition);
+            ret = (otherVal != null && valueSerializer.equals((V) otherVal.value, (V) value));
+            if (ret) {
+                removeInternal(key, partition, h);
+            }
+        } finally {
+            partitionRamLock.get(partition)[seg].writeLock().unlock();
+        }
+
+        return ret;
+    }
+
+    @Override
+    public boolean replace(K key, V oldValue, V newValue) {
+        if (key == null || oldValue == null || newValue == null)
+            throw new NullPointerException();
+
+        boolean ret;
+
+        final int h = hash(key);
+        final int seg = h >>> BUCKET_LENGTH;
+        final int partition = partitioner.getPartition(key);
+
+        partitionRamLock.get(partition)[seg].writeLock().lock();
+        try {
+            LinkedNode<K, V> ln = getInner(key, seg, h, partition);
+            ret = (ln != null && valueSerializer.equals(ln.value, oldValue));
+            if (ret)
+                putInner(key, newValue, h, partition);
+
+        } finally {
+            partitionRamLock.get(partition)[seg].writeLock().unlock();
+        }
+        return ret;
+    }
+
+    @Override
+    public V replace(K key, V value) {
+        if (key == null || value == null)
+            throw new NullPointerException();
+        V ret;
+        final int h = hash(key);
+        final int seg = h >>> BUCKET_LENGTH;
+        final int partition = partitioner.getPartition(key);
+
+        try {
+            partitionRamLock.get(partition)[seg].writeLock().lock();
+            if (getInner(key, seg, h, partition) != null)
+                ret = putInner(key, value, h, partition);
+            else
+                ret = null;
+        } finally {
+            partitionRamLock.get(partition)[seg].writeLock().unlock();
+        }
+        return ret;
+    }
+
+    //until here, we finish all the methods in map operations.
+
+
+    /**
+     * get all the engines
+     * @return
+     */
+    public Collection<Engine> getEngine() {
+        return engines.values();
+    }
+
+
+    class PersistedStorage implements Comparable<PersistedStorage> {
+        long timeStamp;
+
+        StoreAppend store;
+
+        public PersistedStorage(long timeStamp, StoreAppend persistedStore) {
+            this.timeStamp = timeStamp;
+            store = persistedStore;
+        }
+
+        @Override
+        public int compareTo(PersistedStorage o) {
+            return timeStamp > o.timeStamp ? -1 : 1;
+        }
+    }
+
+
+    /**
+     * <p>
+     * Make readonly snapshot view of current Map. Snapshot is immutable and not affected by
+     * modifications made by other threads.
+     * Useful if you need consistent view on Map.
+     * </p><p>
+     * Maintaining snapshot have some overhead, underlying Engine is closed after Map view is GCed.
+     * Please make sure to release reference to this Map view, so snapshot view can be garbage
+     * collected.
+     * </p>
+     *
+     * @return snapshot
+     */
+    public Map<K, V> snapshot() {
+        HashMap<Integer, Engine> snapshots = new HashMap<Integer, Engine>();
+        //TODO thread unsafe if underlying engines are not thread safe
+        Iterator<Integer> keyIterator = engines.keySet().iterator();
+        while (keyIterator.hasNext()) {
+            int partition = keyIterator.next();
+            snapshots.put(partition, TxEngine.createSnapshotFor(engines.get(partition)));
+        }
+        return new PartitionedHTreeMap<K, V>(
+                tableId,
+                hasherName,
+                workingDirectory,
+                name,
+                partitioner,
+                closeEngine,
+                hashSalt,
+                keySerializer,
+                valueSerializer,
+                null,
+                executor,
+                false,
+                ramThreshold);
+    }
+
 
 
 }
