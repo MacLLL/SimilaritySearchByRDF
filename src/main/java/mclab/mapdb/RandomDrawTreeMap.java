@@ -100,6 +100,11 @@ public class RandomDrawTreeMap<K, V>
     protected boolean defaultMapDBInitialized[]= null;
 
     /**
+     * keep the number of objects in each sub-index
+     */
+    private int[] numberOfObjectsInEachPartition=null;
+
+    /**
      * Indicates if this collection collection was not made by DB by user.
      * If user can not access DB object, we must shutdown Executor and close Engine ourself
      * in close() method.
@@ -181,7 +186,7 @@ public class RandomDrawTreeMap<K, V>
      */
     public void getAllRootRecIdForEachSegment(){
         for (int i = 0; i < partitionRootRec.size(); i++) {
-            System.out.println("partiion #" + i +"has" + partitionRootRec.get(i) );
+            System.out.println("partition #" + i +"has" + partitionRootRec.get(i) );
             for (long x: partitionRootRec.get(i)) {
                 System.out.print(x+",");
             }
@@ -391,6 +396,8 @@ public class RandomDrawTreeMap<K, V>
         this.executor = executor;
 
         this.ramThreshold = ramThreshold;
+
+        this.numberOfObjectsInEachPartition=new int[partitioner.numPartitions];
     }
 
     /**
@@ -1309,8 +1316,17 @@ public class RandomDrawTreeMap<K, V>
         }
     }
 
+    /**
+     * get each size of sub-index
+     */
+    public void getPartitionNums() {
+        for (int i = 0; i < numberOfObjectsInEachPartition.length; i++) {
+            System.out.println("Partition " + i + " has " + numberOfObjectsInEachPartition[i] + " objects.");
+        }
+    }
     @Override
     public V put(final K key, final V value) {
+
         if (key == null)
             throw new IllegalArgumentException("null key");
 
@@ -1323,6 +1339,8 @@ public class RandomDrawTreeMap<K, V>
         final int partition = partitioner.getPartition(
                 (K) (hasher instanceof LocalitySensitiveHasher ? h : key));
         initPartitionIfNecessary(partition);
+        if(hasher instanceof LocalitySensitiveHasher)
+            numberOfObjectsInEachPartition[partition]++;
         try {
             partitionRamLock.get(partition)[seg].writeLock().lock();
             ret = putInner(key, value, h, partition);
@@ -1463,6 +1481,8 @@ public class RandomDrawTreeMap<K, V>
                 while (nodeRecid != 0) {
                     //get the node
                     LinkedNode<K, V> n = engine.get(nodeRecid, LN_SERIALIZER);
+                    //take the next at first, since it will change latter
+                    final long nextRecid = n.next;
                     //calculate the position in next level
                     final int pos = (hash(n.key) >>> (NUM_BITS_PER_COMPARISON * (level - 1))) &
                             BITS_COMPARISON_MASK;
@@ -1474,7 +1494,6 @@ public class RandomDrawTreeMap<K, V>
                     engine.update(nodeRecid, n, LN_SERIALIZER);
                     if (CC.ASSERT && nodeRecid == n.next)
                         throw new DBException.DataCorruption("cyclic reference in linked list");
-                    final long nextRecid = n.next;
                     nodeRecid = nextRecid;
                 }
 
@@ -1488,7 +1507,6 @@ public class RandomDrawTreeMap<K, V>
                 counter(partition, seg, engine, +1);
                 return null;
             } else {
-                //Nan Zhu:
                 // record does not exist in linked list and the linked list hasn't overflow,
                 // so create new one
                 recid = dirOffset < 0 ? 0 : dirGet(dir, dirOffset) >>> 1;
@@ -2360,7 +2378,7 @@ public class RandomDrawTreeMap<K, V>
             int partition = keyIterator.next();
             snapshots.put(partition, TxEngine.createSnapshotFor(engines.get(partition)));
         }
-        return new PartitionedHTreeMap<K, V>(
+        return new RandomDrawTreeMap<K,V>(
                 tableId,
                 hasherName,
                 workingDirectory,
