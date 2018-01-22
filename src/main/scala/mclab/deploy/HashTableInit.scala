@@ -1,24 +1,22 @@
 package mclab.deploy
 
-import java.util.concurrent._
+import java.util.concurrent.{ExecutorService, Executors}
 
 import akka.actor._
 import com.typesafe.config.{Config, ConfigFactory}
-import cpslab.db._
-import cpslab.deploy.HashTableInit.getClass
-import cpslab.lsh.LSH
-import cpslab.lsh.vector.{SparseVector, Vectors}
-import cpslab.utils.{HashPartitioner, LocalitySensitivePartitioner, Serializers}
+import mclab.mapdb.RandomDrawTreeMap
+import mclab.lsh.vector.{SparseVector, Vectors}
+import mclab.lsh.LSH
+import mclab.utils.{HashPartitioner, LocalitySensitivePartitioner, Serializers}
 
 import scala.collection.mutable.{ArrayBuffer, ListBuffer}
 import scala.io.Source
 import scala.language.postfixOps
-import java.util.concurrent.{Callable, FutureTask, Executors, ExecutorService}
 
 /**
   * initialize the Tables(mainTable,LSHTable)
   */
-private[cpslab] object HashTableInit {
+private[mclab] object HashTableInit {
   var createFlag:Boolean=false
   private var tableNum=0
   private var permutationNum=0
@@ -30,73 +28,73 @@ private[cpslab] object HashTableInit {
   }
   //inital definination for HashTable
   private def setupTable(tableName: String, confInstance: Config,
-                         table: PartitionedHTreeMap[_, _]): Unit = {
+                         table: RandomDrawTreeMap[_, _]): Unit = {
     table.BUCKET_OVERFLOW = confInstance.getInt(s"cpslab.$tableName.bufferOverflow")
     table.updateBucketLength(confInstance.getInt(s"cpslab.$tableName.bucketBits"))
     table.updateDirectoryNodeSize(confInstance.getInt(s"cpslab.$tableName.dirNodeSize"),
       confInstance.getInt(s"cpslab.$tableName.chainLength"))
   }
 
-  def initializeActorBasedHashTree(conf: Config): Unit = {
-    val tableNum = conf.getInt("cpslab.lsh.tableNum")
-    setTableNum(tableNum)
-    val numPartitions = conf.getInt("cpslab.mainTable.numPartitions")
-    val workingDirRoot = conf.getString("cpslab.lsh.workingDirRoot")
-    val ramThreshold = conf.getInt("cpslab.lsh.ramThreshold")
-    val partitionBits = conf.getInt("cpslab.lsh.partitionBits")
-    val permutationNum=conf.getInt("cpslab.lsh.permutationNum")
-    setPermutationNum(permutationNum)
-    val confForPartitioner = ConfigFactory.parseString(
-      s"""
-         |cpslab.lsh.vectorDim=32
-         |cpslab.lshTable.chainLength=$partitionBits
-      """.stripMargin).withFallback(conf)
-    def initializeVectorDatabase(tableId: Int): PartitionedHTreeMap[Int, Boolean] = {
-      new ActorBasedPartitionedHTreeMap[Int, Boolean](
-        conf,
-        tableId,
-        "lsh",
-        workingDirRoot + "-" + tableId,
-        "partitionedTree-" + tableId,
+//  def initializeActorBasedHashTree(conf: Config): Unit = {
+//    val tableNum = conf.getInt("cpslab.lsh.tableNum")
+//    setTableNum(tableNum)
+//    val numPartitions = conf.getInt("cpslab.mainTable.numPartitions")
+//    val workingDirRoot = conf.getString("cpslab.lsh.workingDirRoot")
+//    val ramThreshold = conf.getInt("cpslab.lsh.ramThreshold")
+//    val partitionBits = conf.getInt("cpslab.lsh.partitionBits")
+//    val permutationNum=conf.getInt("cpslab.lsh.permutationNum")
+//    setPermutationNum(permutationNum)
+//    val confForPartitioner = ConfigFactory.parseString(
+//      s"""
+//         |cpslab.lsh.vectorDim=32
+//         |cpslab.lshTable.chainLength=$partitionBits
+//      """.stripMargin).withFallback(conf)
+//    def initializeVectorDatabase(tableId: Int): RandomDrawTreeMap[Int, Boolean] = {
+//      new ActorBasedPartitionedHTreeMap[Int, Boolean](
+//        conf,
+//        tableId,
+//        "lsh",
+//        workingDirRoot + "-" + tableId,
+//        "partitionedTree-" + tableId,
+////        new HashPartitioner[Int](numPartitions),
+//        new LocalitySensitivePartitioner[Int](confForPartitioner, tableId, partitionBits),
+//        true,
+//        1,
+//        Serializers.scalaIntSerializer,
+//        null,
+//        null,
+//        Executors.newCachedThreadPool(),
+//        true,
+//        ramThreshold)
+//    }
+//    def initializeIdToVectorMap(conf: Config): PartitionedHTreeMap[Int, SparseVector] = {
+//      new ActorBasedPartitionedHTreeMap[Int, SparseVector](
+//        conf,
+//        tableNum,
+//        "default",
+//        workingDirRoot + "-vector",
+//        "vectorIdToVector",
 //        new HashPartitioner[Int](numPartitions),
-        new LocalitySensitivePartitioner[Int](confForPartitioner, tableId, partitionBits),
-        true,
-        1,
-        Serializers.scalaIntSerializer,
-        null,
-        null,
-        Executors.newCachedThreadPool(),
-        true,
-        ramThreshold)
-    }
-    def initializeIdToVectorMap(conf: Config): PartitionedHTreeMap[Int, SparseVector] = {
-      new ActorBasedPartitionedHTreeMap[Int, SparseVector](
-        conf,
-        tableNum,
-        "default",
-        workingDirRoot + "-vector",
-        "vectorIdToVector",
-        new HashPartitioner[Int](numPartitions),
-        true,
-        1,
-        Serializers.scalaIntSerializer,
-        Serializers.vectorSerializer,
-        null,
-        Executors.newCachedThreadPool(),
-        true,
-        ramThreshold)
-    }
-    ActorBasedPartitionedHTreeMap.actorSystem = ActorSystem("AK", conf)
-    vectorDatabase = new Array[PartitionedHTreeMap[Int, Boolean]](tableNum)
-    for (tableId <- 0 until tableNum) {
-      vectorDatabase(tableId) = initializeVectorDatabase(tableId)
-      setupTable("lshTable", conf, vectorDatabase(tableId))
-      vectorDatabase(tableId).initStructureLocks()
-    }
-    vectorIdToVector = initializeIdToVectorMap(conf)
-    setupTable("mainTable", conf, vectorIdToVector)
-    vectorIdToVector.initStructureLocks()
-  }
+//        true,
+//        1,
+//        Serializers.scalaIntSerializer,
+//        Serializers.vectorSerializer,
+//        null,
+//        Executors.newCachedThreadPool(),
+//        true,
+//        ramThreshold)
+//    }
+//    ActorBasedPartitionedHTreeMap.actorSystem = ActorSystem("AK", conf)
+//    vectorDatabase = new Array[PartitionedHTreeMap[Int, Boolean]](tableNum)
+//    for (tableId <- 0 until tableNum) {
+//      vectorDatabase(tableId) = initializeVectorDatabase(tableId)
+//      setupTable("lshTable", conf, vectorDatabase(tableId))
+//      vectorDatabase(tableId).initStructureLocks()
+//    }
+//    vectorIdToVector = initializeIdToVectorMap(conf)
+//    setupTable("mainTable", conf, vectorIdToVector)
+//    vectorIdToVector.initStructureLocks()
+//  }
 
   def initializeMapDBHashMap(conf: Config): Unit = {
     this.createFlag=true
@@ -113,8 +111,8 @@ private[cpslab] object HashTableInit {
          |cpslab.lsh.vectorDim=32
          |cpslab.lsh.chainLength=$partitionBits
       """.stripMargin).withFallback(conf)
-    def initializeVectorDatabase(tableId: Int): PartitionedHTreeMap[Int, Boolean] = {
-      val newTree = new PartitionedHTreeMap[Int, Boolean](
+    def initializeVectorDatabase(tableId: Int): RandomDrawTreeMap[Int, Boolean] = {
+      val newTree = new RandomDrawTreeMap[Int, Boolean](
         tableId,
         "lsh",
         workingDirRoot + "-" + tableId,
@@ -130,8 +128,8 @@ private[cpslab] object HashTableInit {
         ramThreshold)
       newTree
     }
-    def initializeIdToVectorMap(): PartitionedHTreeMap[Int, SparseVector] = {
-      new PartitionedHTreeMap[Int, SparseVector](
+    def initializeIdToVectorMap(): RandomDrawTreeMap[Int, SparseVector] = {
+      new RandomDrawTreeMap[Int, SparseVector](
         tableNum,
         "default",
         workingDirRoot + "-vector",
@@ -146,7 +144,7 @@ private[cpslab] object HashTableInit {
         true,
         ramThreshold)
     }
-    vectorDatabase= new Array[PartitionedHTreeMap[Int, Boolean]](tableNum*permutationNum)
+    vectorDatabase= new Array[RandomDrawTreeMap[Int, Boolean]](tableNum*permutationNum)
     for (tableId <- 0 until tableNum*permutationNum) {
       vectorDatabase(tableId) = initializeVectorDatabase(tableId)
       setupTable("lshTable", conf, vectorDatabase(tableId))
@@ -160,77 +158,77 @@ private[cpslab] object HashTableInit {
   }
 
 
-  def initializePartitionedHashMap(conf: Config): Unit = {
-    val tableNum = conf.getInt("cpslab.lsh.tableNum")
-    setTableNum(tableNum)
-    val workingDirRoot = conf.getString("cpslab.lsh.workingDirRoot")
-    val ramThreshold = conf.getInt("cpslab.lsh.ramThreshold")
-    val numPartitions = conf.getInt("cpslab.mainTable.numPartitions")//partition for mainTable
-    // LSHTable configurations
-    val partitionBits = conf.getInt("cpslab.lsh.partitionBits")//partition number for lshTable, 2bits for 4 partitions
-    val ifFromFile = conf.getString("cpslab.lsh.partitionBitsGenerateMethod")
-    val permutationNum=conf.getInt("cpslab.lsh.permutationNum")
-    setPermutationNum(permutationNum)
-    //default lsh hash value dimension is 32, and we need lshTable.chainLength is partitionBits
-    val confForPartitioner = ConfigFactory.parseString(
-      s"""
-         |cpslab.lsh.vectorDim=32
-         |cpslab.lsh.generateMethod=$ifFromFile
-         |cpslab.lsh.familyFilePath=partitionFunc.txt
-         |cpslab.lshTable.chainLength=$partitionBits
-      """.stripMargin).withFallback(conf)
-    def initializeVectorDatabase(tableId: Int): PartitionedHTreeMap[Int, Boolean] = {
-      new ActorPartitionedHTreeBasic[Int, Boolean](
-        tableId,
-        "lsh",
-        workingDirRoot + "-" + tableId,
-        "partitionedTree-" + tableId,
-        new LocalitySensitivePartitioner[Int](confForPartitioner, tableId, partitionBits),
-        true,
-        1,
-        Serializers.scalaIntSerializer,
-        null,
-        null,
-        Executors.newCachedThreadPool(),
-        true,
-        ramThreshold)
-    }
-    def initializeIdToVectorMap(): PartitionedHTreeMap[Int, SparseVector] = {
-      new ActorPartitionedHTreeBasic[Int, SparseVector](
-        tableNum,
-        "default",
-        workingDirRoot + "-vector",
-        "vectorIdToVector",
-        new HashPartitioner[Int](numPartitions),
-        true,
-        1,
-        Serializers.scalaIntSerializer,
-        Serializers.vectorSerializer,
-        null,
-        Executors.newCachedThreadPool(),
-        true,
-        ramThreshold)
-    }
-    vectorDatabase = new Array[PartitionedHTreeMap[Int, Boolean]](permutationNum*tableNum)
-    for (tableId <- 0 until permutationNum*tableNum) {
-      vectorDatabase(tableId) = initializeVectorDatabase(tableId)
-      setupTable("lshTable", conf, vectorDatabase(tableId))
-    }
-    vectorIdToVector = initializeIdToVectorMap()
-    setupTable("mainTable", conf, vectorIdToVector)
-
-    for (tableId <- 0 until permutationNum*tableNum) {
-      vectorDatabase(tableId).initStructureLocks()
-    }
-    vectorIdToVector.initStructureLocks()
-  }
+//  def initializePartitionedHashMap(conf: Config): Unit = {
+//    val tableNum = conf.getInt("cpslab.lsh.tableNum")
+//    setTableNum(tableNum)
+//    val workingDirRoot = conf.getString("cpslab.lsh.workingDirRoot")
+//    val ramThreshold = conf.getInt("cpslab.lsh.ramThreshold")
+//    val numPartitions = conf.getInt("cpslab.mainTable.numPartitions")//partition for mainTable
+//    // LSHTable configurations
+//    val partitionBits = conf.getInt("cpslab.lsh.partitionBits")//partition number for lshTable, 2bits for 4 partitions
+//    val ifFromFile = conf.getString("cpslab.lsh.partitionBitsGenerateMethod")
+//    val permutationNum=conf.getInt("cpslab.lsh.permutationNum")
+//    setPermutationNum(permutationNum)
+//    //default lsh hash value dimension is 32, and we need lshTable.chainLength is partitionBits
+//    val confForPartitioner = ConfigFactory.parseString(
+//      s"""
+//         |cpslab.lsh.vectorDim=32
+//         |cpslab.lsh.generateMethod=$ifFromFile
+//         |cpslab.lsh.familyFilePath=partitionFunc.txt
+//         |cpslab.lshTable.chainLength=$partitionBits
+//      """.stripMargin).withFallback(conf)
+//    def initializeVectorDatabase(tableId: Int): RandomDrawTreeMap[Int, Boolean] = {
+//      new ActorPartitionedHTreeBasic[Int, Boolean](
+//        tableId,
+//        "lsh",
+//        workingDirRoot + "-" + tableId,
+//        "partitionedTree-" + tableId,
+//        new LocalitySensitivePartitioner[Int](confForPartitioner, tableId, partitionBits),
+//        true,
+//        1,
+//        Serializers.scalaIntSerializer,
+//        null,
+//        null,
+//        Executors.newCachedThreadPool(),
+//        true,
+//        ramThreshold)
+//    }
+//    def initializeIdToVectorMap(): PartitionedHTreeMap[Int, SparseVector] = {
+//      new ActorPartitionedHTreeBasic[Int, SparseVector](
+//        tableNum,
+//        "default",
+//        workingDirRoot + "-vector",
+//        "vectorIdToVector",
+//        new HashPartitioner[Int](numPartitions),
+//        true,
+//        1,
+//        Serializers.scalaIntSerializer,
+//        Serializers.vectorSerializer,
+//        null,
+//        Executors.newCachedThreadPool(),
+//        true,
+//        ramThreshold)
+//    }
+//    vectorDatabase = new Array[PartitionedHTreeMap[Int, Boolean]](permutationNum*tableNum)
+//    for (tableId <- 0 until permutationNum*tableNum) {
+//      vectorDatabase(tableId) = initializeVectorDatabase(tableId)
+//      setupTable("lshTable", conf, vectorDatabase(tableId))
+//    }
+//    vectorIdToVector = initializeIdToVectorMap()
+//    setupTable("mainTable", conf, vectorIdToVector)
+//
+//    for (tableId <- 0 until permutationNum*tableNum) {
+//      vectorDatabase(tableId).initStructureLocks()
+//    }
+//    vectorIdToVector.initStructureLocks()
+//  }
 
 
 
   //many hash trees
-  var vectorDatabase: Array[PartitionedHTreeMap[Int, Boolean]] = null
-  //MainTable
-  var vectorIdToVector: PartitionedHTreeMap[Int, SparseVector] = null
+  var vectorDatabase: Array[RandomDrawTreeMap[Int, Boolean]] = null
+//  MainTable
+  var vectorIdToVector: RandomDrawTreeMap[Int, SparseVector] = null
 
   def initializeMapDBHashMultiple(conf: Config): Unit = {
     this.createFlag=true
@@ -247,8 +245,8 @@ private[cpslab] object HashTableInit {
          |cpslab.lsh.vectorDim=32
          |cpslab.lsh.chainLength=$partitionBits
       """.stripMargin).withFallback(conf)
-    def initializeVectorDatabase(tableId: Int): PartitionedHTreeMap[Int, Boolean] = {
-      val newTree = new PartitionedHTreeMap[Int, Boolean](
+    def initializeVectorDatabase(tableId: Int): RandomDrawTreeMap[Int, Boolean] = {
+      val newTree = new RandomDrawTreeMap[Int, Boolean](
         tableId,
         "lsh",
         workingDirRoot + "-" + tableId,
@@ -264,8 +262,8 @@ private[cpslab] object HashTableInit {
         ramThreshold)
       newTree
     }
-    def initializeIdToVectorMap(): PartitionedHTreeMap[Int, SparseVector] = {
-      new PartitionedHTreeMap[Int, SparseVector](
+    def initializeIdToVectorMap(): RandomDrawTreeMap[Int, SparseVector] = {
+      new RandomDrawTreeMap[Int, SparseVector](
         tableNum,
         "default",
         workingDirRoot + "-vector",
@@ -280,7 +278,7 @@ private[cpslab] object HashTableInit {
         true,
         ramThreshold)
     }
-    vectorDatabase_blue= new Array[PartitionedHTreeMap[Int, Boolean]](tableNum*permutationNum)
+    vectorDatabase_blue= new Array[RandomDrawTreeMap[Int, Boolean]](tableNum*permutationNum)
     for (tableId <- 0 until tableNum*permutationNum) {
       vectorDatabase_blue(tableId) = initializeVectorDatabase(tableId)
       setupTable("lshTable", conf, vectorDatabase_blue(tableId))
@@ -291,7 +289,7 @@ private[cpslab] object HashTableInit {
       vectorDatabase_blue(tableId).initStructureLocks()
     }
     vectorIdToVector_blue.initStructureLocks()
-    vectorDatabase_green= new Array[PartitionedHTreeMap[Int, Boolean]](tableNum*permutationNum)
+    vectorDatabase_green= new Array[RandomDrawTreeMap[Int, Boolean]](tableNum*permutationNum)
     for (tableId <- 0 until tableNum*permutationNum) {
       vectorDatabase_green(tableId) = initializeVectorDatabase(tableId)
       setupTable("lshTable", conf, vectorDatabase_green(tableId))
@@ -302,7 +300,7 @@ private[cpslab] object HashTableInit {
       vectorDatabase_green(tableId).initStructureLocks()
     }
     vectorIdToVector_green.initStructureLocks()
-    vectorDatabase_red= new Array[PartitionedHTreeMap[Int, Boolean]](tableNum*permutationNum)
+    vectorDatabase_red= new Array[RandomDrawTreeMap[Int, Boolean]](tableNum*permutationNum)
     for (tableId <- 0 until tableNum*permutationNum) {
       vectorDatabase_red(tableId) = initializeVectorDatabase(tableId)
       setupTable("lshTable", conf, vectorDatabase_red(tableId))
@@ -319,13 +317,13 @@ private[cpslab] object HashTableInit {
 
 
 
-  var vectorDatabase_blue:Array[PartitionedHTreeMap[Int,Boolean]] =null
-  var vectorDatabase_green:Array[PartitionedHTreeMap[Int,Boolean]] =null
-  var vectorDatabase_red:Array[PartitionedHTreeMap[Int,Boolean]] =null
+  var vectorDatabase_blue:Array[RandomDrawTreeMap[Int,Boolean]] =null
+  var vectorDatabase_green:Array[RandomDrawTreeMap[Int,Boolean]] =null
+  var vectorDatabase_red:Array[RandomDrawTreeMap[Int,Boolean]] =null
 
-  var vectorIdToVector_blue: PartitionedHTreeMap[Int, SparseVector] = null
-  var vectorIdToVector_green: PartitionedHTreeMap[Int, SparseVector] = null
-  var vectorIdToVector_red: PartitionedHTreeMap[Int, SparseVector] = null
+  var vectorIdToVector_blue: RandomDrawTreeMap[Int, SparseVector] = null
+  var vectorIdToVector_green: RandomDrawTreeMap[Int, SparseVector] = null
+  var vectorIdToVector_red: RandomDrawTreeMap[Int, SparseVector] = null
 
 
 
@@ -429,29 +427,29 @@ private[cpslab] object HashTableInit {
       HashTableInit.vectorDatabase(i).put(HashTableInit.vectorDatabase(i).size(),true)
     }
   }
-  /**
-    * fit the vector into the Indexing structure
-    * @param filename
-    * @param conf
-    */
-  def fit(filename:String,conf:Config):Unit={
-    if(LSHServer.lshEngine == null){ LSHServer.lshEngine = new LSH(conf)}
-    val (vectorArray,numbers) =getSparseVectorsFromFile(filename)
-    HashTableInit.initializeActorBasedHashTree(conf)
-    //generate dataTable
-    for ( i <- 0 until numbers){
-      HashTableInit.vectorIdToVector.put(i,vectorArray(i))
-    }
-//    vectorArray.map( x => HashTableInit.vectorIdToVector.put(x.vectorId,x))
-    //get the LSHTable number
-//    val tableNum = conf.getInt("cpslab.lsh.tableNum")
-    //put the data into hashTables
-    for ( i <- 0 until this.tableNum){
-      for ( j <- vectorArray.indices){
-        HashTableInit.vectorDatabase(i).put(j,true)
-      }
-    }
-  }
+//  /**
+//    * fit the vector into the Indexing structure
+//    * @param filename
+//    * @param conf
+//    */
+//  def fit(filename:String,conf:Config):Unit={
+//    if(LSHServer.lshEngine == null){ LSHServer.lshEngine = new LSH(conf)}
+//    val (vectorArray,numbers) =getSparseVectorsFromFile(filename)
+//    HashTableInit.initializeActorBasedHashTree(conf)
+//    //generate dataTable
+//    for ( i <- 0 until numbers){
+//      HashTableInit.vectorIdToVector.put(i,vectorArray(i))
+//    }
+////    vectorArray.map( x => HashTableInit.vectorIdToVector.put(x.vectorId,x))
+//    //get the LSHTable number
+////    val tableNum = conf.getInt("cpslab.lsh.tableNum")
+//    //put the data into hashTables
+//    for ( i <- 0 until this.tableNum){
+//      for ( j <- vectorArray.indices){
+//        HashTableInit.vectorDatabase(i).put(j,true)
+//      }
+//    }
+//  }
   /**
     * Get the sparse vector from datafile,
     * @param fileName: the filename
