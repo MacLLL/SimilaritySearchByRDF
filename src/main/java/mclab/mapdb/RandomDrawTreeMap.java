@@ -15,10 +15,7 @@ import mclab.deploy.HashTableInit;
 
 import java.io.*;
 import java.util.*;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.*;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.logging.Logger;
@@ -111,6 +108,8 @@ public class RandomDrawTreeMap<K, V>
 
     public final ExecutorService executor;
 
+    private final int structureLockScale = 256;
+
     /**
      * locks for each sub-index
      */
@@ -153,6 +152,12 @@ public class RandomDrawTreeMap<K, V>
      */
     private final String workingDirectory;
     private final String name;
+
+    /**
+     * persistedStorage
+     */
+    protected ConcurrentHashMap<Integer, PriorityQueue<PersistedStorage>> persistedStorages =
+            new ConcurrentHashMap<Integer, PriorityQueue<PersistedStorage>>();
 
     /**
      * node which holds key-value pair
@@ -883,7 +888,7 @@ public class RandomDrawTreeMap<K, V>
             long recId = partitionRootRec.get(partition)[seg];
             Engine engine = engines.get(partition);
             if (((Store) engine).getCurrSize() >= ramThreshold) {
-                persist(partition);
+                runPersistTask(partition);
             }
             return searchWithSimilarity(key, engine, recId, h);
         } catch (NullPointerException npe) {
@@ -904,7 +909,7 @@ public class RandomDrawTreeMap<K, V>
             long recId = partitionRootRec.get(partition)[seg];
             Engine engine = engines.get(partition);
             if (((Store) engine).getCurrSize() >= ramThreshold) {
-                persist(partition);
+                runPersistTask(partition);
             }
             return search(key, engine, recId, h);
         } catch (Exception npe) {
@@ -2329,7 +2334,7 @@ public class RandomDrawTreeMap<K, V>
 
         @Override
         public int compareTo(PersistedStorage o) {
-            return timeStamp > o.timeStamp ? -1 : 1;
+            return timeStamp > o.timeStamp ? 1 : -1;
         }
     }
 
@@ -2369,6 +2374,129 @@ public class RandomDrawTreeMap<K, V>
                 executor,
                 false,
                 ramThreshold);
+    }
+
+
+    /**
+     * close all engines
+     */
+    @Override
+    public void close() {
+        //shutdown all associated objects
+        if (executor != null && closeExecutor && !executor.isTerminated()) {
+            executor.shutdown();
+            try {
+                executor.awaitTermination(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                throw new DBException.Interrupted(e);
+            }
+        }
+
+        if (closeEngine) {
+            Iterator<Integer> keyIterator = engines.keySet().iterator();
+            while (keyIterator.hasNext()) {
+                int key = keyIterator.next();
+                engines.get(key).close();
+            }
+        }
+    }
+
+    private void releaseAllLocksOfPartition(int partitionId) {
+        for (int i = 0; i < SEG; i++) {
+            partitionRamLock.get(partitionId)[i].writeLock().unlock();
+            partitionPersistLock.get(partitionId)[i].writeLock().unlock();
+        }
+    }
+
+    /**
+     * lock the parition
+     * @param partitionId
+     * @return
+     */
+    private boolean tryLockPartition(int partitionId) {
+        for (int i = 0; i < SEG; i++) {
+            if (!partitionPersistLock.get(partitionId)[i].writeLock().tryLock()) {
+                return false;
+            }
+            if (!partitionRamLock.get(partitionId)[i].writeLock().tryLock()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * save the index into disk(SSD)
+     * @param partitionId
+     */
+    public void runPersistTask(final int partitionId) {
+        //TODO: when integrate with Spark, we shall use Spark's threadpool
+        if (!partitionPersistLock.containsKey(partitionId)) {
+            return;
+        }
+        if (executor != null) {
+            executor.execute(new Runnable() {
+            @Override
+             public void run() {
+            //TODO: we can use snapshot to allow concurrent write threads
+                long persistTimestamp = System.currentTimeMillis();
+                if (!tryLockPartition(partitionId)) {
+                    //persist is ongoing
+                    return;
+                }
+                try {
+                    StoreSegment engine = (StoreSegment) engines.get(partitionId);
+                    //engine.compact();
+                    String unionDir = workingDirectory + "/" + name + "/" + partitionId;
+                    File dir = new File(unionDir);
+                    dir.mkdirs();
+                    long startTime = System.nanoTime();
+                    Store persistStorage = engine.persist(unionDir + "/" + persistTimestamp);
+                    addPersistedStorage(partitionId, persistTimestamp, (StoreAppend) persistStorage);
+                    long dataSummaryStartTime = System.nanoTime();
+                    generateDataSummary(partitionId);
+                    long dataSummaryEndTime = System.nanoTime();
+                    long endTime = System.nanoTime();
+                    long totalDuration = endTime - startTime;
+                    long dataSummaryDuration = dataSummaryEndTime - dataSummaryStartTime;
+                    System.out.println(totalDuration + " " + dataSummaryDuration);
+                    initPartition(partitionId);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                } finally {
+                    releaseAllLocksOfPartition(partitionId);
+                }
+              }
+             });
+            } else {
+             LOG.warning("executor is null, rejecting to persist");
+        }
+    }
+
+    private void addPersistedStorage(int partitionId, long timestamp, StoreAppend persistedStore) {
+        if (!persistedStorages.containsKey(partitionId)) {
+            persistedStorages.put(partitionId, new PriorityQueue<PersistedStorage>());
+        }
+        persistedStorages.get(partitionId).add(new PersistedStorage(timestamp, persistedStore));
+    }
+
+    private void generateDataSummary(int partitionId) {
+        StoreAppend persistStorage = persistedStorages.get(partitionId).peek().store;
+        persistStorage.initDataSummary((int) sizeLong(partitionId), 0.001);
+        KeyIterator keyIterator = new KeyIterator(partitionId);
+        while (keyIterator.hasNext()) {
+            K key = keyIterator.next();
+            persistStorage.updateDataSummary((Integer) key);
+        }
+        persistStorage.persistDataSummary();
+    }
+
+    public void initStructureLocks() {
+        System.out.println("run the RandomDrawTreeMap initStructureLocks");
+        //initialize structureLocks for initializing partition structure
+        for (int i = 0; i < structureLockScale; i++) {
+            structureLocks.put(i, new ReentrantReadWriteLock());
+        }
     }
 
 
