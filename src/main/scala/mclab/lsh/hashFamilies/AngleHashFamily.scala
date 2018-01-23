@@ -119,7 +119,7 @@ private[lsh] class AngleHashFamily(
     */
   override def pick(tableNum: Int): List[LSHTableHashChain[AngleParameterSet]] = {
     val generatedHashChains = new Array[LSHTableHashChain[AngleParameterSet]](tableNum * permutationNum)
-    println(LSH.IsOrthogonal + " "+LSH.generateByPulling)
+//    println(LSH.IsOrthogonal + " "+LSH.generateByPulling)
 
     val hashFamily = if (LSH.IsOrthogonal) {
       //pick orthogonal hash functions

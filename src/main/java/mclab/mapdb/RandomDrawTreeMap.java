@@ -5,6 +5,7 @@ import breeze.stats.distributions.Rand;
 import com.google.common.hash.BloomFilter;
 import com.google.common.hash.Funnels;
 import mclab.deploy.LSHServer;
+import mclab.deploy.SingleRDFInit;
 import mclab.lsh.DefaultHasher;
 import mclab.lsh.Hasher;
 import mclab.lsh.LocalitySensitiveHasher;
@@ -1273,7 +1274,7 @@ public class RandomDrawTreeMap<K, V>
         if (hasher instanceof LocalitySensitiveHasher) {
             // the hasher is the locality sensitive hasher, where we need to calculate the hash of the
             // vector instead of the key value
-            SparseVector v = HashTableInit.vectorIdToVector().get(key);
+            SparseVector v = SingleRDFInit.vectorIdToVector().get(key);
             if (v == null) {
                 System.out.println("fetch vector " + key + ", but got NULL");
                 System.exit(1);
@@ -2510,7 +2511,7 @@ public class RandomDrawTreeMap<K, V>
     }
 
     public void initStructureLocks() {
-        System.out.println("run the RandomDrawTreeMap initStructureLocks");
+//        System.out.println("run the RandomDrawTreeMap initStructureLocks");
         //initialize structureLocks for initializing partition structure
         for (int i = 0; i < structureLockScale; i++) {
             structureLocks.put(i, new ReentrantReadWriteLock());

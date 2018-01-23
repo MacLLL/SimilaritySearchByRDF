@@ -46,7 +46,7 @@ class LocalitySensitivePartitioner[K](conf: Config, tableId: Int, partitionBits:
     val v = new SparseVector(0, 32, index, values)
     //re locality-sensitive hashing:generate the partitions, for example,
     // if it is partitionBits=2, and hash value is 10......,
-    //then move 30 bits, it will become 10.
+    //then move 30 bits, it will become 10, which is sub-index-2
     //too solid!
     localitySensitiveHashing.calculateIndex(v, tableId)(0) >>> (32 - partitionBits)
   }
