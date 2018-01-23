@@ -16,7 +16,7 @@ import scala.io.Source
   * initialize the (dataTable, lshTable) for single feature
   * implement the put get method
   */
-private[mclab] object SingleRDFInit {
+private[mclab] object SingleFeatureRDFInit {
   private var createFlag: Boolean = false
   private var tableNum = 0
   private var permutationNum = 0
@@ -116,7 +116,7 @@ private[mclab] object SingleRDFInit {
     if (LSHServer.lshEngine == null) {
       LSHServer.lshEngine = new LSH(conf)
     }
-    SingleRDFInit.initializeRDFHashMap(conf)
+    SingleFeatureRDFInit.initializeRDFHashMap(conf)
     println("finish initialize the hash tree.")
     val AllSparseVectorsFile = getClass.getClassLoader.getResource(fileName).getFile
     val allDenseVectors = new ListBuffer[Array[Double]]
@@ -125,9 +125,9 @@ private[mclab] object SingleRDFInit {
       val tmp = Vectors.fromPythonString(line)
       val currentSparseVector = new SparseVector(tmp._1, tmp._2, tmp._3, tmp._4)
       allDenseVectors += tmp._4
-      SingleRDFInit.vectorIdToVector.put(count, currentSparseVector)
+      SingleFeatureRDFInit.vectorIdToVector.put(count, currentSparseVector)
       for (tableID <- 0 until this.tableNum * permutationNum) {
-        SingleRDFInit.vectorDatabase(tableID).put(count, true)
+        SingleFeatureRDFInit.vectorDatabase(tableID).put(count, true)
       }
       count += 1
       if (count % 10000 == 0) {
@@ -149,12 +149,12 @@ private[mclab] object SingleRDFInit {
   def newMultiThreadFit(fileName: String, conf: Config): Array[Array[Double]] = {
     if (LSHServer.lshEngine == null) LSHServer.lshEngine = new LSH(conf)
     val threadNum = conf.getInt("mclab.insertThreadNum")
-    SingleRDFInit.initializeRDFHashMap(conf)
+    SingleFeatureRDFInit.initializeRDFHashMap(conf)
     val insertThreadPool: ExecutorService = Executors.newFixedThreadPool(threadNum)
     val AllSparseVectorsFile = getClass.getClassLoader.getResource(fileName).getFile
     val allDenseVectors = new ListBuffer[Array[Double]]
     var vectorId = 0
-    val a = System.currentTimeMillis()
+//    val a = System.currentTimeMillis()
     try {
       for (line <- Source.fromFile(AllSparseVectorsFile).getLines()) {
         val tmp = Vectors.fromPythonString(line)
@@ -177,8 +177,8 @@ private[mclab] object SingleRDFInit {
     } finally {
       insertThreadPool.shutdown()
     }
-    val b = System.currentTimeMillis()
-    print("time is " + (b - a) / 1000 + "s")
+//    val b = System.currentTimeMillis()
+//    println("time is " + (b - a) / 1000 + "s")
     allDenseVectors.toArray
   }
 
@@ -202,21 +202,22 @@ private[mclab] object SingleRDFInit {
   private object InsertTask {
     def insert(id: Int, vector: SparseVector, startTable: Int, endTable: Int): Unit = {
       for (tableID <- startTable until endTable)
-        SingleRDFInit.vectorDatabase(tableID).put(id, true)
+        SingleFeatureRDFInit.vectorDatabase(tableID).put(id, true)
     }
   }
 
   /**
-    * search the queryKey in index
+    * Search the queryKey in index(Non-multiThread version)
+    *
     * @param queryKey
     * @return the similar objects key set in database
     */
-  def querySingleKey(queryKey:Int):Set[AnyRef] = {
+  private def querySingleKey(queryKey:Int):Set[AnyRef] = {
     //search through all LSHTables
     var finalResultsSet = Set.empty[AnyRef]
     try {
-      for (i <- SingleRDFInit.vectorDatabase.indices) {
-        val SingleLSHTableResults = SingleRDFInit.vectorDatabase(i).getSimilar(queryKey).toArray().toSet
+      for (i <- SingleFeatureRDFInit.vectorDatabase.indices) {
+        val SingleLSHTableResults = SingleFeatureRDFInit.vectorDatabase(i).getSimilar(queryKey).toArray().toSet
         finalResultsSet = finalResultsSet.union(SingleLSHTableResults)
       }
       finalResultsSet
@@ -226,42 +227,87 @@ private[mclab] object SingleRDFInit {
     }
   }
 
+  /**
+    * Search the queryArray's similar objects in index(Non-multiThread version)
+    * @param queryArray
+    * @return
+    */
+  def queryBatch(queryArray:Array[Int]):Array[Set[AnyRef]]={
+        val resultsArray:ArrayBuffer[Set[AnyRef]]=ArrayBuffer.empty[Set[AnyRef]]
+        for( i<- queryArray.indices){
+          resultsArray += querySingleKey(queryArray(i))
+        }
+        resultsArray.toArray
+      }
+
+
+  /**
+    * resultsArray to save the all similar objects of keys
+    */
+//  @volatile private val resultsArray:ArrayBuffer[Set[AnyRef]]=ArrayBuffer.empty[Set[AnyRef]]
+  @volatile private var resultsArray:Array[Set[AnyRef]]=null
 
   /**
     * Each query multi thread search over all hashTable,
     * means one thread take responsibility to certain number of hashTable
+    *
     * @param queryArray the keys array
     * @param queryThreadNum numebr of query thread
     * @return the similar objects for each key
     */
   def NewMultiThreadQueryBatch(queryArray:Array[Int],queryThreadNum:Int=5):Array[Set[AnyRef]]={
-    val resultsArray:ArrayBuffer[Set[AnyRef]]=ArrayBuffer.empty[Set[AnyRef]]
+    resultsArray=new Array[Set[AnyRef]](queryArray.length)
     val queryThreadPool: ExecutorService = Executors.newFixedThreadPool(queryThreadNum)
-    try{
-      queryThreadPool.execute(new thr)
-    }
-
     //Todo 多线程操作,然后记得对unionresult的操作加上synchronized...
-
-
+    try{
+      for(i <- 0 until queryThreadNum){
+        queryThreadPool.execute(new threadQuery(queryArray,
+          i * this.tableNum * this.permutationNum / queryThreadNum,
+          (i + 1) * this.tableNum * this.permutationNum / queryThreadNum))
+      }
+    }finally {
+      queryThreadPool.shutdown()
+    }
+    resultsArray
   }
 
-  private class threadQuery() extends Runnable{
+  private class threadQuery(queryArray:Array[Int],startTable:Int,endTable:Int) extends Runnable{
     override def run(): Unit = {
-      InsertTask.insert(vectorId, vector, start, end)
+      QueryTask.query(queryArray,startTable,endTable)
     }
   }
 
-  private 
+  /**
+    * the query task
+    * Steps: 1.search the tables from startTable to endTable to get the resultset for each query key
+    *        2.if the result set is alreay exit in resultArray, do union operation, otherwise append a new one.
+    */
+  private object QueryTask{
+    def query(queryArray:Array[Int],startTable:Int,endTable:Int): Unit ={
+        for (i <- queryArray.indices){
+          var oneResultsSet = Set.empty[AnyRef]
+          try {
+            for (tableId <- startTable until endTable) {
+              oneResultsSet = oneResultsSet.union(SingleFeatureRDFInit.vectorDatabase(tableId).getSimilar(queryArray(i)).toArray().toSet)
+            }
+          } catch {
+            case ex: NullPointerException => println("need to fit the data first")
+          }
+          if(resultsArray(i)==null){
+            synchronized {
+              resultsArray(i) = oneResultsSet
+            }
+//            println("thread is "+startTable+","+endTable+"; add for key="+ queryArray(i))
+          }else{
+            synchronized {
+              resultsArray(i) = resultsArray(i).union(oneResultsSet)
+            }
+//            println("thread is "+startTable+","+endTable+"; union for key="+queryArray(i))
+          }
+      }
 
-
-//  def queryBatch(queryArray:Array[Int]):Array[Set[AnyRef]]={
-//    val resultsArray:ArrayList[Set[AnyRef]]=ArrayBuffer.empty[Set[AnyRef]]
-//    for( i<- queryArray.indices){
-//      resultsArray += querySingleSet(queryArray(i))
-//    }
-//    resultsArray.toArray
-//  }
+    }
+  }
 
 
 
