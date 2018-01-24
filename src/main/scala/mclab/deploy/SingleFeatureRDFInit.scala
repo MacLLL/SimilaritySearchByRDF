@@ -1,8 +1,9 @@
 package mclab.deploy
 
-import java.util
+import breeze.linalg._
 import java.util.concurrent.{ExecutorService, Executors}
 
+import breeze.linalg.{DenseMatrix, DenseVector}
 import com.typesafe.config.{Config, ConfigFactory}
 import mclab.lsh.vector.{SparseVector, Vectors}
 import mclab.mapdb.RandomDrawTreeMap
@@ -154,7 +155,7 @@ private[mclab] object SingleFeatureRDFInit {
     val AllSparseVectorsFile = getClass.getClassLoader.getResource(fileName).getFile
     val allDenseVectors = new ListBuffer[Array[Double]]
     var vectorId = 0
-//    val a = System.currentTimeMillis()
+    var flag=true
     try {
       for (line <- Source.fromFile(AllSparseVectorsFile).getLines()) {
         val tmp = Vectors.fromPythonString(line)
@@ -174,11 +175,14 @@ private[mclab] object SingleFeatureRDFInit {
           println(vectorId + " objects loaded")
         }
       }
-    } finally {
-      insertThreadPool.shutdown()
     }
-//    val b = System.currentTimeMillis()
-//    println("time is " + (b - a) / 1000 + "s")
+    insertThreadPool.shutdown()
+    while(flag){
+      if(insertThreadPool.isTerminated){
+        flag=false
+      }
+      Thread.sleep(5)
+    }
     allDenseVectors.toArray
   }
 
@@ -256,22 +260,29 @@ private[mclab] object SingleFeatureRDFInit {
     * @return the similar objects for each key
     */
   def NewMultiThreadQueryBatch(queryArray:Array[Int],queryThreadNum:Int=5):Array[Set[AnyRef]]={
-    resultsArray=new Array[Set[AnyRef]](queryArray.length)
+    var flagQuery=true
+    this.resultsArray=new Array[Set[AnyRef]](queryArray.length)
     val queryThreadPool: ExecutorService = Executors.newFixedThreadPool(queryThreadNum)
-    //Todo 多线程操作,然后记得对unionresult的操作加上synchronized...
+    //Todo multiThread, remember to add synchronized on union result operation...
     try{
       for(i <- 0 until queryThreadNum){
         queryThreadPool.execute(new threadQuery(queryArray,
           i * this.tableNum * this.permutationNum / queryThreadNum,
           (i + 1) * this.tableNum * this.permutationNum / queryThreadNum))
       }
-    }finally {
-      queryThreadPool.shutdown()
+    }
+    queryThreadPool.shutdown()
+    while(flagQuery){
+      if(queryThreadPool.isTerminated){
+        flagQuery=false
+      }
+      Thread.sleep(5)
     }
     resultsArray
   }
 
-  private class threadQuery(queryArray:Array[Int],startTable:Int,endTable:Int) extends Runnable{
+  private class threadQuery(queryArray:Array[Int],startTable:Int,endTable:Int)
+    extends Runnable{
     override def run(): Unit = {
       QueryTask.query(queryArray,startTable,endTable)
     }
@@ -293,21 +304,98 @@ private[mclab] object SingleFeatureRDFInit {
           } catch {
             case ex: NullPointerException => println("need to fit the data first")
           }
-          if(resultsArray(i)==null){
-            synchronized {
+
+          if(resultsArray(i)==null&&oneResultsSet!=null){
+            this.synchronized {
               resultsArray(i) = oneResultsSet
             }
 //            println("thread is "+startTable+","+endTable+"; add for key="+ queryArray(i))
           }else{
-            synchronized {
+            this.synchronized {
               resultsArray(i) = resultsArray(i).union(oneResultsSet)
             }
 //            println("thread is "+startTable+","+endTable+"; union for key="+queryArray(i))
           }
       }
-
     }
   }
+
+  /**
+    * read the top k ground truth from file
+    * @param filename
+    * @return each ground truth is a set[Int]
+    */
+  def getTopKGroundTruth(filename:String,K:Int):Array[Set[Int]]={
+    val gtFile = getClass.getClassLoader.getResource(filename).getFile
+    val resultsArray:ListBuffer[Set[Int]]=new ListBuffer[Set[Int]]
+    for(line <- Source.fromFile(gtFile).getLines()){
+      resultsArray += Vectors.analysisKNN(line,K).toSet
+    }
+    resultsArray.toArray
+  }
+
+
+  /**
+    * Clear the index, delete all objects. And close the engines
+    */
+  def clearAndClose(): Unit ={
+    SingleFeatureRDFInit.vectorIdToVector.clear()
+    SingleFeatureRDFInit.vectorDatabase.foreach(x=>x.clear())
+    SingleFeatureRDFInit.vectorIdToVector.close()
+    SingleFeatureRDFInit.vectorDatabase.foreach(x=>x.close())
+  }
+
+
+  //ToDO calculate the top k from similar object, by using matrix transfer
+
+  def topKAndPrecisionScore(dataFilename:String,groundTruthFilename:String,conf:Config):(Array[Array[Int]],Double)={
+    val allDenseVectors=this.newMultiThreadFit(dataFilename,conf)
+    val groundTruth=this.getTopKGroundTruth(groundTruthFilename,conf.getInt("mclab.lsh.topK"))
+    val queryArray= new Array[Int](groundTruth.length)
+    var averageScore=0.0
+    val allQueryedTopK=new ArrayBuffer[Array[Int]]
+    for(i <- groundTruth.indices)
+      queryArray(i)=i
+    val resultsSet=this.NewMultiThreadQueryBatch(queryArray,conf.getInt("mclab.queryThreadNum"))
+//    for(i<-resultsArray){println(i)}
+    for (i <- resultsSet.indices) {
+      var score=0.0
+      if(resultsSet(i)!=Set.empty[AnyRef]){
+        val resultSetForOneQuery = resultsSet(i).toArray
+        val queryDenseVector: Array[Double] = allDenseVectors(i)
+        val dataSetMatirx: ArrayBuffer[Array[Double]] = new ArrayBuffer[Array[Double]]
+//        println("size=" + resultSetForOneQuery.length)
+//        addNumber(resultSetForOneQuery.length)
+        for (j <- resultSetForOneQuery.indices) {
+          dataSetMatirx += allDenseVectors(resultSetForOneQuery(j).toString.toInt)
+        }
+        val dv1 = DenseVector(queryDenseVector: _*)
+        val dv2 = DenseMatrix(dataSetMatirx: _*)
+        val a = System.currentTimeMillis()
+        val indexList = argsort(dv2 * dv1).reverse.slice(0, conf.getInt("mclab.lsh.topK"))
+        val b = System.currentTimeMillis()
+        println("For query " + (i) + ", the results are: ")
+        val tmpOneQueryedTopK=new ArrayBuffer[Int]
+        for (w <- indexList.indices) {
+          print(resultSetForOneQuery(indexList(w)) + ",")
+          tmpOneQueryedTopK += resultSetForOneQuery(indexList(w)).toString.toInt
+          if (groundTruth(i).contains(resultSetForOneQuery(indexList(w)).toString.toInt)) {
+            score += 1
+          }
+        }
+        allQueryedTopK += tmpOneQueryedTopK.toArray
+        print("####score=" + score + " distanceCal time is " + (b - a))
+        averageScore += score/(queryArray.length)
+      }
+    }
+    (allQueryedTopK.toArray,averageScore/conf.getInt("mclab.lsh.topK"))
+  }
+
+
+
+
+
+
 
 
 
