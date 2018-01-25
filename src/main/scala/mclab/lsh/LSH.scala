@@ -50,7 +50,14 @@ private[mclab] class LSH(conf: Config,seedNumber:Int=1) extends Serializable {
       List()
     }
   }
-  
+
+  /**
+    * pick the lsh family, can be from file or random generate
+    *
+    * @param lshFamily
+    * @tparam T
+    * @return
+    */
   private def pickUpHashChains[T <: LSHFunctionParameterSet](lshFamily: Option[LSHHashFamily[T]]):
     Option[List[LSHTableHashChain[T]]] = {
     require(lshFamily.isDefined, s"${lshFamilyName} is not a valid family name")
@@ -67,8 +74,7 @@ private[mclab] class LSH(conf: Config,seedNumber:Int=1) extends Serializable {
       }
     })
   }
-  
-  
+
   /**
    * calculate the index of the vector in tables, the index in each table is represented as a 
    * byte array
@@ -113,17 +119,30 @@ private[mclab] class LSH(conf: Config,seedNumber:Int=1) extends Serializable {
 
   /**
     * Output the best hash functions if you find the performance is good.
+    *
+    * @param hashFunctionsID default as 0, put the all hash familes, otherwise only put the certain set hash functions
     */
-  def outPutTheHashFunctionsIntoFile():Unit={
-    val writer=new FileWriter(new File(s"src/test/resources/hashFamily/bestHashFamily-${conf.getString("mclab.lsh.name")}"),true)
-    lshFamilyName match {
-      case "angle" =>
-        tableIndexGenerators.map(x=>x.chainedHashFunctions.map(x=> writer.append(x.toString+"\r\n")))
-      case "pStable" =>
-        tableIndexGenerators.map(x=>x.chainedHashFunctions.map(y=> writer.append(y.toString+"\r\n")))
-      case x => None
+  def outPutTheHashFunctionsIntoFile(hashFunctionsID:Int = -1): Unit = {
+    if (hashFunctionsID == -1) {
+      val writer = new FileWriter(new File(s"src/test/resources/hashFamily/bestHashFamily-${conf.getString("mclab.lsh.name")}"), true)
+      lshFamilyName match {
+        case "angle" =>
+          tableIndexGenerators.map(x => x.chainedHashFunctions.map(x => writer.append(x.toString + "\r\n")))
+        case "pStable" =>
+          tableIndexGenerators.map(x => x.chainedHashFunctions.map(y => writer.append(y.toString + "\r\n")))
+        case x => None
+      }
+      writer.close()
+    } else {
+      val writer = new FileWriter(new File(s"src/test/resources/hashFamily/theBestHashFamilyForPartition-${conf.getString("mclab.lsh.name")}"), true)
+      lshFamilyName match {
+        case "angle" =>
+          tableIndexGenerators(hashFunctionsID).chainedHashFunctions.foreach(x => writer.write(x.toString + "\r\n"))
+        case "pStable" =>
+          tableIndexGenerators(hashFunctionsID).chainedHashFunctions.foreach(x => writer.write(x.toString + "\r\n"))
+        case x => None
+      }
     }
-    writer.close()
   }
 }
 
