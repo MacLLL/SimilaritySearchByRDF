@@ -257,11 +257,14 @@ private[mclab] object SingleFeatureRDFInit {
     *
     * @param queryArray the keys array
     * @param queryThreadNum numebr of query thread
-    * @return the similar objects for each key
+    * @return the similar objects (is the keys array, which save in dataTable)
     */
   def NewMultiThreadQueryBatch(queryArray:Array[Int],queryThreadNum:Int=5):Array[Set[AnyRef]]={
     var flagQuery=true
     this.resultsArray=new Array[Set[AnyRef]](queryArray.length)
+    for(i<-resultsArray.indices){
+      resultsArray(i) = Set()
+    }
     val queryThreadPool: ExecutorService = Executors.newFixedThreadPool(queryThreadNum)
     //Todo multiThread, remember to add synchronized on union result operation...
     try{
@@ -304,17 +307,10 @@ private[mclab] object SingleFeatureRDFInit {
           } catch {
             case ex: NullPointerException => println("need to fit the data first")
           }
-
-          if(resultsArray(i)==null&&oneResultsSet!=null){
-            this.synchronized {
-              resultsArray(i) = oneResultsSet
-            }
-//            println("thread is "+startTable+","+endTable+"; add for key="+ queryArray(i))
-          }else{
-            this.synchronized {
+          //better way to achieve multi-Thread
+          this.synchronized{
+            if(oneResultsSet!=null)
               resultsArray(i) = resultsArray(i).union(oneResultsSet)
-            }
-//            println("thread is "+startTable+","+endTable+"; union for key="+queryArray(i))
           }
       }
     }
@@ -347,7 +343,13 @@ private[mclab] object SingleFeatureRDFInit {
 
 
   //ToDO calculate the top k from similar object, by using matrix transfer
-
+  /**
+    * get the topK similar objects and calculate the precision based on ground truth
+    * @param dataFilename feature data file name
+    * @param groundTruthFilename ground truth file name
+    * @param conf configuration
+    * @return (topK,precision)
+    */
   def topKAndPrecisionScore(dataFilename:String,groundTruthFilename:String,conf:Config):(Array[Array[Int]],Double)={
     val allDenseVectors=this.newMultiThreadFit(dataFilename,conf)
     val groundTruth=this.getTopKGroundTruth(groundTruthFilename,conf.getInt("mclab.lsh.topK"))
@@ -384,25 +386,11 @@ private[mclab] object SingleFeatureRDFInit {
           }
         }
         allQueryedTopK += tmpOneQueryedTopK.toArray
-        print("####score=" + score + " distanceCal time is " + (b - a))
+        println("####score=" + score + " distanceCal time is " + (b - a))
         averageScore += score/(queryArray.length)
       }
     }
     (allQueryedTopK.toArray,averageScore/conf.getInt("mclab.lsh.topK"))
   }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 }
