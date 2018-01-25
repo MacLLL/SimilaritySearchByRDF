@@ -22,10 +22,10 @@ private[lsh] case class AngleParameterSet(oneFunction: SparseVector) extends LSH
   * @param permutationNum
   */
 private[lsh] class AngleHashFamily(
-                                    familySize: Int,
-                                    vectorDim: Int,
-                                    chainLength: Int,
-                                    permutationNum: Int) extends LSHHashFamily[AngleParameterSet] {
+    familySize: Int,
+    vectorDim: Int,
+    chainLength: Int,
+    permutationNum: Int) extends LSHHashFamily[AngleParameterSet] {
 
   /**
     * Generate a unit vector as SparseVector form, which is normal angle functions

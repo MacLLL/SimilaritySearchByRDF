@@ -8,7 +8,7 @@ import org.scalatest.{BeforeAndAfterAll, FunSuite}
 
 import scala.collection.mutable.ListBuffer
 import scala.io.Source
-import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.config.ConfigFactory
 
 /**
   * Test the average distance between the query's hash value and the ground truth top K objects' hash values.

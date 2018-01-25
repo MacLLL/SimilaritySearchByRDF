@@ -1,6 +1,11 @@
 package mclab.Experiments
 
 import com.typesafe.config.ConfigFactory
+import mclab.TestSettings
+import mclab.deploy.LSHServer
+import mclab.lsh.LSH
+import mclab.lsh.vector.{SparseVector, Vectors}
+import mclab.utils.LocalitySensitivePartitioner
 import org.scalatest.{BeforeAndAfterAll, FunSuite}
 
 import scala.collection.mutable.ListBuffer
@@ -10,166 +15,117 @@ import scala.math._
 /**
   * Created by eternity on 10/27/17.
   */
-class PartitionDistributionSuite extends FunSuite with BeforeAndAfterAll{
+class PartitionDistributionSuite extends FunSuite with BeforeAndAfterAll {
   override def beforeAll(): Unit = {
     LSHServer.lshEngine = new LSH(TestSettings.testBaseConf)
   }
-  val partitionBits=4
 
+  val partitionBits = 4
   val confForPartitioner = ConfigFactory.parseString(
     s"""
-       |cpslab.lsh.vectorDim=32
-       |cpslab.lsh.chainLength=$partitionBits
+       |mclab.lsh.vectorDim=32
+       |mclab.lsh.chainLength=$partitionBits
       """.stripMargin).withFallback(TestSettings.testBaseConf)
 
-  val partition=new LocalitySensitivePartitioner[Int](confForPartitioner, 1, partitionBits)
+  val partition = new LocalitySensitivePartitioner[Int](confForPartitioner, 1, partitionBits)
 
-  def loadVectorFile(filename1:String,filename2:String,k:Int=10):(ListBuffer[SparseVector],ListBuffer[Array[Int]])={
-    val allSparseVectorFile=getClass.getClassLoader.getResource(filename1).getFile
-    val allSparseVector=new ListBuffer[SparseVector]
-    var i=0
-    for(line <- Source.fromFile(allSparseVectorFile).getLines()){
-      val tmp=Vectors.fromPythonString(line)
-      val currentSparseVector=new SparseVector(tmp._1,tmp._2,tmp._3,tmp._4)
-      //      println(currentSparseVector.toString)
+  /**
+    * Load the feature data file and ground truth file
+    *
+    * @param filename1 feature data file
+    * @param filename2 ground truth file
+    * @param k         top k to be analyzed, default as 10
+    * @return the list of feature vectors, and the list of ground truth
+    */
+  def loadVectorFile(filename1: String, filename2: String, k: Int = 10): (ListBuffer[SparseVector], ListBuffer[Array[Int]]) = {
+    println("Start load the data...")
+    val allSparseVector = new ListBuffer[SparseVector]
+    var count = 0
+    for (line <- Source.fromFile(getClass.getClassLoader.getResource(filename1).getFile).getLines()) {
+      val tmp = Vectors.fromPythonString(line)
+      val currentSparseVector = new SparseVector(tmp._1, tmp._2, tmp._3, tmp._4)
       allSparseVector += currentSparseVector
-      i += 1
-      if(i%10000==0){
-        println(i + " objects loaded")
+      count += 1
+      if (count % 10000 == 0) {
+        println(count)
       }
-
     }
-    val resultsArray:ListBuffer[Array[Int]]=new ListBuffer[Array[Int]]
-    for(line <- Source.fromFile(getClass.getClassLoader.getResource(filename2).getFile).getLines()){
-      resultsArray += Vectors.analysisKNN(line,k)
+    val resultsArray: ListBuffer[Array[Int]] = new ListBuffer[Array[Int]]
+    for (line <- Source.fromFile(getClass.getClassLoader.getResource(filename2).getFile).getLines()) {
+      resultsArray += Vectors.analysisKNN(line, k)
     }
-    println("finish load")
-    (allSparseVector,resultsArray)
+    println("Finish load the feature data and ground truth.")
+    (allSparseVector, resultsArray)
   }
-  def partitionDistribution(allSparseVector:ListBuffer[SparseVector],
-                            resultsArray:ListBuffer[Array[Int]],hashFamilyID:Int=1,k:Int=10):Unit={
-    val totalResults=Array(0.0,0.0,0.0)
-    for (eachGT <- resultsArray) {
-      val distibution=Array(0,0,0,0)
-      for (oneObject <- eachGT.slice(0,k)) {
-        val sub_indexID = partition.getPartition(LSHServer.lshEngine.calculateIndex(allSparseVector(oneObject),
-          hashFamilyID)(0))
-        distibution(sub_indexID) += 1
-      }
-      distibution.map(x => print(x + " "))
-      println()
-      scala.util.Sorting.quickSort(distibution)
-      for(i<-distibution.indices){totalResults(i) += distibution(i)/3000.0}
-//      distibution.map(x => print(x + " "))
-
-    }
-    println("finish calculate hashid=" + hashFamilyID)
-    totalResults.map(x => print(x/k*100.0 + "% "))
-    println()
-    //    for(x <- similarityDegree) println(x)
-    //    println(averageSimilarityDegree)
-
-  }
-
-  def stepwiseDistribution(allSparseVector:ListBuffer[SparseVector],
-                            resultsArray:ListBuffer[Array[Int]],hashFamilyID:Int=1,k:Int=10):(Double,Double,Double)={
+  /**
+    * Calculate the distribution of objects into different sub-indexs
+    *
+    * @param allSparseVector
+    * @param resultsArray
+    * @param hashFamilyID
+    * @param k
+    * @return
+    */
+  def stepwiseDistribution(allSparseVector: ListBuffer[SparseVector],
+                           resultsArray: ListBuffer[Array[Int]], hashFamilyID: Int = 1, k: Int = 10): (Double, Double, Double) = {
     //highest, step one, step two. step 3
-    val finalStepsResult=Array(0.0,0.0,0.0,0.0,0.0)
+    val finalStepsResult: Array[Double] = new Array(partitionBits + 1)
     for (eachGT <- resultsArray) {
-      val stepsResults=Array(0.0,0.0,0.0,0.0,0.0)
-      var distibution=Array(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
-      for (oneObject <- eachGT.slice(0,k)) {
+      val stepsResults: Array[Double] = new Array(partitionBits + 1)
+      val distribution: Array[Int] = new Array(pow(2, 4).toInt)
+      for (oneObject <- eachGT.slice(0, k)) {
         val sub_indexID = partition.getPartition(LSHServer.lshEngine.calculateIndex(allSparseVector(oneObject),
           hashFamilyID)(0))
-        distibution(sub_indexID) += 1
+        distribution(sub_indexID) += 1
       }
-//      distibution.map(x => print(x + " "))
-//      println()
-
-      val sortedDistribution=distibution.zipWithIndex.sorted
-
-      val highest=sortedDistribution(pow(2,partitionBits).toInt - 1)._2
-      stepsResults(0) += sortedDistribution(pow(2,partitionBits).toInt - 1)._1
-
-      for(i<-sortedDistribution.indices){
-        if(Integer.bitCount(sortedDistribution(i)._2^highest)==1){
-          stepsResults(1) += sortedDistribution(i)._1
-        }else if(Integer.bitCount(sortedDistribution(i)._2^highest)==2){
-          stepsResults(2) += sortedDistribution(i)._1
-        }else if(Integer.bitCount(sortedDistribution(i)._2^highest)==3){
-          stepsResults(3) += sortedDistribution(i)._1
-        }else if(Integer.bitCount(sortedDistribution(i)._2^highest)==4){
-          stepsResults(4) += sortedDistribution(i)._1
-        }
+      //sort the distribution
+      val sortedDistribution = distribution.zipWithIndex.sorted
+      //take the sub-index-ID of highest one
+      val highest = sortedDistribution(pow(2, partitionBits).toInt - 1)._2
+      //put the highest one in result
+      stepsResults(0) += sortedDistribution(pow(2, partitionBits).toInt - 1)._1
+      for (i <- sortedDistribution.indices) {
+        //add the ?-step distribution into result
+        if (sortedDistribution(i)._2 != highest)
+          stepsResults(Integer.bitCount(sortedDistribution(i)._2 ^ highest)) += sortedDistribution(i)._1
       }
-//      stepsResults.map(x => print(x + " "))
-//      println()
-//      scala.util.Sorting.quickSort(distibution)
-
-      for(i<-stepsResults.indices){finalStepsResult(i) += stepsResults(i)/3000.0}
-      //      distibution.map(x => print(x + " "))
-
+      for (i <- stepsResults.indices) {
+        finalStepsResult(i) += stepsResults(i) / resultsArray.toArray.length.toDouble
+      }
     }
-    println("finish calculate hashid=" + hashFamilyID)
-    finalStepsResult.map(x => print(x/k*100.0 + "% "))
+    println("Finish calculate hash family ID = " + hashFamilyID)
+    finalStepsResult.foreach(x => print(x / k * 100.0 + "% "))
     println()
-    (finalStepsResult(0) , finalStepsResult(1), finalStepsResult(2))
-//    finalStepsResult(0)
-    //    for(x <- similarityDegree) println(x)
-    //    println(averageSimilarityDegree)
-
+    (finalStepsResult(0), finalStepsResult(1), finalStepsResult(2))
   }
 
-
-  test("TOP k partition distribution-------->dataset:Glove"){
-    val kArray=Array(10,30,50,70,90)
-//    val k=20
-//    println("k=" + k)
-    var flag=false
-    val (allSparseVector,resultsArray)=loadVectorFile("partition/glove.100d.Sparsevector.txt",
-      "partition/partition_100d_top100",100)
-    var highestID=0
-    for(k <- kArray){
+  test("TOP k partition distribution-------->dataset:Glove") {
+//    val topKArray = Array(10,30,50,70,90)
+    val topKArray = Array(10)
+    val tuneRatio = 3
+    var flag = false
+    val (allSparseVector, resultsArray) = loadVectorFile("glove.twitter.27B/glove.twitter.27B.100d.20k.SparseVector.txt",
+      "glove.twitter.27B/glove.twitter.27B.100d.20k.groundtruth", 10)
+    var highestHashFamilyID = 0
+    for (k <- topKArray) {
       println("********************k=" + k + "*************************")
-      if(flag==false){
-        var highestPercent=0.0
-        var highestPercent1=0.0
-        for(id<- 0 until 100){
-          val (tmp1,tmp2,tmp3)=stepwiseDistribution(allSparseVector,resultsArray,id,k)
-          if(tmp1 >= highestPercent && tmp1 - highestPercent > highestPercent1 - tmp2 - 3/100.0*k) {
-//          if(tmp1 > highestPercent){
+      //to pick the best hash function wisely
+      if (!flag) {
+        var highestPercent = 0.0
+        var secondHighestPercent = 0.0
+        for (hashId <- 0 until TestSettings.testBaseConf.getInt("mclab.lsh.tableNum")) {
+          val (tmp1, tmp2, tmp3) = stepwiseDistribution(allSparseVector, resultsArray, hashId, k)
+          if (tmp1 >= highestPercent && tmp1 - highestPercent > secondHighestPercent - tmp2 - tuneRatio / 100.0 * k) {
             highestPercent = tmp1
-            highestPercent1 = tmp2
-            highestID = id
+            secondHighestPercent = tmp2
+            highestHashFamilyID = hashId
           }
         }
-        flag=true
-      }else{
-        stepwiseDistribution(allSparseVector,resultsArray,highestID,k)
+        LSHServer.lshEngine.outPutTheHashFunctionsIntoFile(highestHashFamilyID)
+        flag = true
+      } else {
+        stepwiseDistribution(allSparseVector, resultsArray, highestHashFamilyID, k)
       }
     }
   }
-//  test("TOP k partition distribution-------->dataset:Glove------print"){
-//    val kArray=Array(10)
-//    //    val k=20
-//    //    println("k=" + k)
-//    val (allSparseVector,resultsArray)=loadVectorFile("glove.twitter.27B/glove120k100dReverse.txt",
-//      "glove.twitter.27B/glove100d120k.txtQueryAndTop10NNResult1200",10)
-//    for(k <- kArray){
-//      println("********************k=" + k + "*************************")
-//      for(id<- 0 until 20){
-//        stepwiseDistribution(allSparseVector,resultsArray,id,k)
-//      }
-//    }
-//  }
-
-
-//  test("TOP k partition distribution-------->dataset:CC_WEB"){
-//
-//    val (allSparseVector,resultsArray)=loadVectorFile("video256/Vector256dForCategory_blue_1",
-//      "CC_WEB_VIDEO/new_Test_ES.rst",10)
-//    for(id<- 1 until 10){
-//      partitionDistribution(allSparseVector,resultsArray,id)
-//    }
-//  }
 }
