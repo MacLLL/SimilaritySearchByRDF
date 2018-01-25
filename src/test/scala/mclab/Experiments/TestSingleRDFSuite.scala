@@ -6,7 +6,10 @@ import org.scalatest.{BeforeAndAfterAll, FunSuite}
 import mclab.lsh.LSH
 
 
-class TestSingleRDF extends FunSuite with BeforeAndAfterAll {
+/**
+  * Test the methods in object SingleFeatureRDFInit
+  */
+class TestSingleRDFSuite extends FunSuite with BeforeAndAfterAll {
   /**
     * initialize the hash functions based on configuration file
     */
