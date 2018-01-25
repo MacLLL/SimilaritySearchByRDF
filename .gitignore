@@ -4,3 +4,4 @@
 Test.scala
 target/
 project/
+src/test/resources/glove.twitter.27B

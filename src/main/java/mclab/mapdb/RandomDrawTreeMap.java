@@ -5,7 +5,7 @@ import breeze.stats.distributions.Rand;
 import com.google.common.hash.BloomFilter;
 import com.google.common.hash.Funnels;
 import mclab.deploy.LSHServer;
-import mclab.deploy.SingleRDFInit;
+import mclab.deploy.SingleFeatureRDFInit;
 import mclab.lsh.DefaultHasher;
 import mclab.lsh.Hasher;
 import mclab.lsh.LocalitySensitiveHasher;
@@ -1274,7 +1274,7 @@ public class RandomDrawTreeMap<K, V>
         if (hasher instanceof LocalitySensitiveHasher) {
             // the hasher is the locality sensitive hasher, where we need to calculate the hash of the
             // vector instead of the key value
-            SparseVector v = SingleRDFInit.vectorIdToVector().get(key);
+            SparseVector v = SingleFeatureRDFInit.vectorIdToVector().get(key);
             if (v == null) {
                 System.out.println("fetch vector " + key + ", but got NULL");
                 System.exit(1);

@@ -118,7 +118,7 @@ private[mclab] object SingleFeatureRDFInit {
       LSHServer.lshEngine = new LSH(conf)
     }
     SingleFeatureRDFInit.initializeRDFHashMap(conf)
-    println("finish initialize the hash tree.")
+    println("Finish initialize the RDF.")
     val AllSparseVectorsFile = getClass.getClassLoader.getResource(fileName).getFile
     val allDenseVectors = new ListBuffer[Array[Double]]
     var count = 0
@@ -151,6 +151,7 @@ private[mclab] object SingleFeatureRDFInit {
     if (LSHServer.lshEngine == null) LSHServer.lshEngine = new LSH(conf)
     val threadNum = conf.getInt("mclab.insertThreadNum")
     SingleFeatureRDFInit.initializeRDFHashMap(conf)
+    println("Finish initialize the RDF.")
     val insertThreadPool: ExecutorService = Executors.newFixedThreadPool(threadNum)
     val AllSparseVectorsFile = getClass.getClassLoader.getResource(fileName).getFile
     val allDenseVectors = new ListBuffer[Array[Double]]
@@ -183,6 +184,7 @@ private[mclab] object SingleFeatureRDFInit {
       }
       Thread.sleep(5)
     }
+    println("finish load, totally " + vectorId + " objects.")
     allDenseVectors.toArray
   }
 
@@ -359,7 +361,6 @@ private[mclab] object SingleFeatureRDFInit {
     for(i <- groundTruth.indices)
       queryArray(i)=i
     val resultsSet=this.NewMultiThreadQueryBatch(queryArray,conf.getInt("mclab.queryThreadNum"))
-//    for(i<-resultsArray){println(i)}
     for (i <- resultsSet.indices) {
       var score=0.0
       if(resultsSet(i)!=Set.empty[AnyRef]){
@@ -367,7 +368,6 @@ private[mclab] object SingleFeatureRDFInit {
         val queryDenseVector: Array[Double] = allDenseVectors(i)
         val dataSetMatirx: ArrayBuffer[Array[Double]] = new ArrayBuffer[Array[Double]]
 //        println("size=" + resultSetForOneQuery.length)
-//        addNumber(resultSetForOneQuery.length)
         for (j <- resultSetForOneQuery.indices) {
           dataSetMatirx += allDenseVectors(resultSetForOneQuery(j).toString.toInt)
         }
@@ -376,7 +376,7 @@ private[mclab] object SingleFeatureRDFInit {
         val a = System.currentTimeMillis()
         val indexList = argsort(dv2 * dv1).reverse.slice(0, conf.getInt("mclab.lsh.topK"))
         val b = System.currentTimeMillis()
-        println("For query " + (i) + ", the results are: ")
+//        println("For query " + (i) + ", the results are: ")
         val tmpOneQueryedTopK=new ArrayBuffer[Int]
         for (w <- indexList.indices) {
           print(resultSetForOneQuery(indexList(w)) + ",")
@@ -386,8 +386,8 @@ private[mclab] object SingleFeatureRDFInit {
           }
         }
         allQueryedTopK += tmpOneQueryedTopK.toArray
-        println("####score=" + score + " distanceCal time is " + (b - a))
-        averageScore += score/(queryArray.length)
+//        println("####score=" + score + " distanceCal time is " + (b - a))
+        averageScore += score/queryArray.length
       }
     }
     (allQueryedTopK.toArray,averageScore/conf.getInt("mclab.lsh.topK"))

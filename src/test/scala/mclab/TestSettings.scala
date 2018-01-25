@@ -23,29 +23,28 @@ private[mclab] object TestSettings {
        |mclab.lsh.seed3 = 83752
        |mclab.lsh.typeOfIndex = original
        |
-       |cpslab.lshTable.bufferOverflow=3000
-       |cpslab.mainTable.bufferOverflow=3000
-       |cpslab.lshTable.bucketBits=28
-       |cpslab.mainTable.bucketBits=28
-       |cpslab.lshTable.dirNodeSize=32
-       |cpslab.mainTable.dirNodeSize=32
-       |mclab.lshTable.chainLength = 10
-       |mclab.mainTable.chainLength = 10
+       |mclab.lshTable.bufferOverflow=500
+       |mclab.dataTable.bufferOverflow=500
+       |mclab.lshTable.bucketBits=28
+       |mclab.dataTable.bucketBits=28
+       |mclab.lshTable.dirNodeSize=32
+       |mclab.dataTable.dirNodeSize=32
+       |mclab.lshTable.chainLength = 32
+       |mclab.dataTable.chainLength = 32
+       |mclab.dataTable.numPartitions=1
+       |mclab.lsh.partitionBits=2
+       |mclab.lsh.partitionBitsGenerateMethod="default"
+       |
+       |mclab.lsh.ramThreshold=2147483647
+       |mclab.lsh.workingDirRoot="PersistIndex"
+       |mclab.insertThreadNum=5
+       |mclab.queryThreadNum=5
+       |mclab.lsh.topK = 10
        |
        |
-       |
-       |
-       |cpslab.lsh.workingDirRoot="~/LSH/"
-       |cpslab.lsh.ramThreshold=2147483647
-       |cpslab.mainTable.numPartitions=1
-       |cpslab.lsh.partitionBits=2
-       |cpslab.lsh.partitionBitsGenerateMethod="default"
        |
        |
        |cpslab.lsh.plsh.benchmark.expDuration=0
-
-
-       |cpslab.lsh.htree.dirNodeSize=128
        |cpslab.lsh.benchmark.replica=1
        |cpslab.lsh.benchmark.expDuration=30000
        |cpslab.lsh.benchmark.offset=0
@@ -54,7 +53,7 @@ private[mclab] object TestSettings {
 
        |cpslab.lsh.similarityThreshold = 0.0
 
-       |cpslab.lsh.topK = 2
+       |
        |cpslab.lsh.plsh.updateWindowSize = 10
        |cpslab.lsh.plsh.partitionSwitch=false
        |cpslab.lsh.plsh.maxNumberOfVector=1000000
@@ -69,8 +68,7 @@ private[mclab] object TestSettings {
        |cpslab.lsh.deploy.client = "/user/client"
        |
        |cpslab.lsh.nodeID = 0
-       |cpslab.lsh.indexMethod = sampling
-       |
+
        |cpslab.lsh.deploy.maxNodeNum=100
        |
        """.stripMargin)
