@@ -6,3 +6,4 @@ target/
 project/
 src/test/resources/glove.twitter.27B
 src/test/resources/CC_WEB_VIDEO
+src/test/resources/partition

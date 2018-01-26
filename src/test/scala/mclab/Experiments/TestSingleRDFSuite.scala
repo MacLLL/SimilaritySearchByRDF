@@ -4,6 +4,9 @@ import mclab.TestSettings
 import mclab.deploy.{LSHServer, SingleFeatureRDFInit}
 import org.scalatest.{BeforeAndAfterAll, FunSuite}
 import mclab.lsh.LSH
+import mclab.lsh.vector.SparseVector
+
+import scala.util.Random
 
 
 /**
@@ -59,9 +62,26 @@ class TestSingleRDFSuite extends FunSuite with BeforeAndAfterAll {
   }
 
   test("test the topK and precision") {
-    val (topK, precision) = SingleFeatureRDFInit.topKAndPrecisionScore("glove.twitter.27B/glove.twitter.27B.100d.20k.SparseVector.txt",
+    val allDenseVectors=SingleFeatureRDFInit.newMultiThreadFit("glove.twitter.27B/glove.twitter.27B.100d.20k.SparseVector.txt",TestSettings.testBaseConf)
+    val (topK, precision) = SingleFeatureRDFInit.topKAndPrecisionScore(allDenseVectors,
       "glove.twitter.27B/glove.twitter.27B.100d.20k.groundtruth", TestSettings.testBaseConf)
     topK.foreach(x => println(x.toSet))
     println("The precision is " + precision)
+  }
+
+
+  test("test getSimilar by using SparseVector,rather than key in dataTable"){
+    SingleFeatureRDFInit.newMultiThreadFit("glove.twitter.27B/glove.twitter.27B.100d.20k.SparseVector.txt",TestSettings.testBaseConf)
+    assert(SingleFeatureRDFInit.vectorIdToVector.size() == 20000)
+
+    val indices=Range(0,100).toArray
+    val values1=new Array[Double](100).map(_ => Random.nextDouble())
+    val values2=new Array[Double](100).map(_ => Random.nextDouble())
+
+    val x=SingleFeatureRDFInit.NewMultiThreadQueryBatch(Array(new SparseVector(0,100,indices,values1),
+      new SparseVector((0,100,indices,values2))),5)
+    for(item <- x)
+      println(item)
+
   }
 }

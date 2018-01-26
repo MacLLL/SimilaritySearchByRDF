@@ -111,7 +111,7 @@ private[mclab] object SingleFeatureRDFInit {
     *
     * @param fileName the fileurl in resources
     * @param conf configuration
-    * @return the array of dataset
+    * @return the array of all denseVector in dataTable
     */
   def newFastFit(fileName: String, conf: Config): Array[Array[Double]] = {
     if (LSHServer.lshEngine == null) {
@@ -143,9 +143,9 @@ private[mclab] object SingleFeatureRDFInit {
   /**
     * new Multiple threads fit, to create the indexing faster.
     *
-    * @param fileName
-    * @param conf
-    * @return
+    * @param fileName the feature file name
+    * @param conf configuration
+    * @return the Array of all densVectors in dataTable
     */
   def newMultiThreadFit(fileName: String, conf: Config): Array[Array[Double]] = {
     if (LSHServer.lshEngine == null) LSHServer.lshEngine = new LSH(conf)
@@ -184,8 +184,53 @@ private[mclab] object SingleFeatureRDFInit {
       }
       Thread.sleep(5)
     }
-    println("finish load, totally " + vectorId + " objects.")
+    println("finish load, dataTable totally has " + vectorIdToVector.size() + " objects.")
     allDenseVectors.toArray
+  }
+
+  /**
+    * new Multiple threads fit, to create the indexing faster. Used when the the query parameter is sparseVector array
+    *
+    * @param querySVArray query sparseVector array
+    * @param threadNum numebr of thread to put the query sparseVector into index first
+    * @return the new added DenseVectors in dataTable; the query Array
+    */
+  private def newMultiThreadFit(querySVArray:Array[SparseVector], threadNum:Int=5): (Array[Array[Double]],Array[Int]) = {
+//    if (LSHServer.lshEngine == null) LSHServer.lshEngine = new LSH(conf)
+//    val threadNum = conf.getInt("mclab.insertThreadNum")
+    val insertThreadPool: ExecutorService = Executors.newFixedThreadPool(threadNum)
+    val newDenseVectors = new ListBuffer[Array[Double]]
+    val queryArray = new ArrayBuffer[Int]
+    var vectorId = vectorIdToVector.size()
+    var flag=true
+    try {
+      for (currentSparseVector <- querySVArray) {
+        newDenseVectors += currentSparseVector.values
+        this.vectorIdToVector.put(vectorId, currentSparseVector)
+        try {
+          for (i <- 0 until threadNum) {
+            insertThreadPool.execute(new threadFit(vectorId,
+              currentSparseVector,
+              i * this.tableNum * this.permutationNum / threadNum,
+              (i + 1) * this.tableNum * this.permutationNum / threadNum))
+          }
+        }
+        queryArray += vectorId
+        vectorId += 1
+        if (vectorId % 10000 == 0) {
+          println(vectorId + " objects loaded")
+        }
+      }
+    }
+    insertThreadPool.shutdown()
+    while(flag){
+      if(insertThreadPool.isTerminated){
+        flag=false
+      }
+      Thread.sleep(5)
+    }
+    println("finish load, dataTable totally has " + vectorIdToVector.size() + " objects.")
+    (newDenseVectors.toArray,queryArray.toArray)
   }
 
   /**
@@ -286,6 +331,44 @@ private[mclab] object SingleFeatureRDFInit {
     resultsArray
   }
 
+  /**
+    * Each query multi thread search over all hashTable,
+    * means one thread take responsibility to certain number of hashTable
+    * For system use
+    *
+    * @param querySVArray the query sparseVector array
+    * @param queryThreadNum numebr of query thread
+    * @return the similar objects (is the keys array, which save in dataTable)
+    */
+  def NewMultiThreadQueryBatch(querySVArray:Array[SparseVector],queryThreadNum:Int):Array[Set[AnyRef]]={
+    //fit the new SparseVectors first, and get the keys array
+    val (_,queryArray)=this.newMultiThreadFit(querySVArray,queryThreadNum)
+    var flagQuery=true
+    this.resultsArray=new Array[Set[AnyRef]](queryArray.length)
+    for(i<-resultsArray.indices){
+      resultsArray(i) = Set()
+    }
+    val queryThreadPool: ExecutorService = Executors.newFixedThreadPool(queryThreadNum)
+    //Todo multiThread, remember to add synchronized on union result operation...
+    try{
+      for(i <- 0 until queryThreadNum){
+        queryThreadPool.execute(new threadQuery(queryArray,
+          i * this.tableNum * this.permutationNum / queryThreadNum,
+          (i + 1) * this.tableNum * this.permutationNum / queryThreadNum))
+      }
+    }
+    queryThreadPool.shutdown()
+    while(flagQuery){
+      if(queryThreadPool.isTerminated){
+        flagQuery=false
+      }
+      Thread.sleep(5)
+    }
+    resultsArray
+  }
+
+
+
   private class threadQuery(queryArray:Array[Int],startTable:Int,endTable:Int)
     extends Runnable{
     override def run(): Unit = {
@@ -347,19 +430,16 @@ private[mclab] object SingleFeatureRDFInit {
   //ToDO calculate the top k from similar object, by using matrix transfer
   /**
     * get the topK similar objects and calculate the precision based on ground truth
-    * @param dataFilename feature data file name
+    * @param allDenseVectors the feature Data
     * @param groundTruthFilename ground truth file name
     * @param conf configuration
     * @return (topK,precision)
     */
-  def topKAndPrecisionScore(dataFilename:String,groundTruthFilename:String,conf:Config):(Array[Array[Int]],Double)={
-    val allDenseVectors=this.newMultiThreadFit(dataFilename,conf)
+  def topKAndPrecisionScore(allDenseVectors:Array[Array[Double]],groundTruthFilename:String,conf:Config):(Array[Array[Int]],Double)={
     val groundTruth=this.getTopKGroundTruth(groundTruthFilename,conf.getInt("mclab.lsh.topK"))
-    val queryArray= new Array[Int](groundTruth.length)
+    val queryArray= groundTruth.indices.toArray
     var averageScore=0.0
     val allQueryedTopK=new ArrayBuffer[Array[Int]]
-    for(i <- groundTruth.indices)
-      queryArray(i)=i
     val resultsSet=this.NewMultiThreadQueryBatch(queryArray,conf.getInt("mclab.queryThreadNum"))
     for (i <- resultsSet.indices) {
       var score=0.0
