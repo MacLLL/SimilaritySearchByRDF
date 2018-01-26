@@ -32,12 +32,12 @@ private[mclab] object TestSettings {
        |mclab.lshTable.chainLength = 32
        |mclab.dataTable.chainLength = 32
        |mclab.dataTable.numPartitions=1
-       |mclab.lsh.partitionBits=2
+       |mclab.lsh.partitionBits=4
        |mclab.lsh.partitionBitsGenerateMethod="default"
        |
        |mclab.lsh.ramThreshold=2147483647
        |mclab.lsh.workingDirRoot="PersistIndex"
-       |mclab.insertThreadNum=5
+       |mclab.insertThreadNum=10
        |mclab.queryThreadNum=5
        |mclab.lsh.topK = 10
        |

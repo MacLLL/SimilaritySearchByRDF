@@ -261,14 +261,15 @@ private[mclab] object SingleFeatureRDFInit {
     * Search the queryKey in index(Non-multiThread version)
     *
     * @param queryKey
+    * @param steps steps in multi parition search
     * @return the similar objects key set in database
     */
-  private def querySingleKey(queryKey:Int):Set[AnyRef] = {
+  private def querySingleKey(queryKey:Int,steps:Int=0):Set[AnyRef] = {
     //search through all LSHTables
     var finalResultsSet = Set.empty[AnyRef]
     try {
       for (i <- SingleFeatureRDFInit.vectorDatabase.indices) {
-        val SingleLSHTableResults = SingleFeatureRDFInit.vectorDatabase(i).getSimilar(queryKey).toArray().toSet
+        val SingleLSHTableResults = SingleFeatureRDFInit.vectorDatabase(i).getSimilarWithStepWise(queryKey,steps).toArray().toSet
         finalResultsSet = finalResultsSet.union(SingleLSHTableResults)
       }
       finalResultsSet
@@ -281,12 +282,13 @@ private[mclab] object SingleFeatureRDFInit {
   /**
     * Search the queryArray's similar objects in index(Non-multiThread version)
     * @param queryArray
+    * @param steps steps in multi parition search
     * @return
     */
-  def queryBatch(queryArray:Array[Int]):Array[Set[AnyRef]]={
+  def queryBatch(queryArray:Array[Int],steps:Int):Array[Set[AnyRef]]={
         val resultsArray:ArrayBuffer[Set[AnyRef]]=ArrayBuffer.empty[Set[AnyRef]]
         for( i<- queryArray.indices){
-          resultsArray += querySingleKey(queryArray(i))
+          resultsArray += querySingleKey(queryArray(i),steps)
         }
         resultsArray.toArray
       }
@@ -304,9 +306,10 @@ private[mclab] object SingleFeatureRDFInit {
     *
     * @param queryArray the keys array
     * @param queryThreadNum numebr of query thread
+    * @param steps steps in multi parition search
     * @return the similar objects (is the keys array, which save in dataTable)
     */
-  def NewMultiThreadQueryBatch(queryArray:Array[Int],queryThreadNum:Int=5):Array[Set[AnyRef]]={
+  def NewMultiThreadQueryBatch(queryArray:Array[Int],steps:Int=0,queryThreadNum:Int=5):Array[Set[AnyRef]]={
     var flagQuery=true
     this.resultsArray=new Array[Set[AnyRef]](queryArray.length)
     for(i<-resultsArray.indices){
@@ -318,7 +321,8 @@ private[mclab] object SingleFeatureRDFInit {
       for(i <- 0 until queryThreadNum){
         queryThreadPool.execute(new threadQuery(queryArray,
           i * this.tableNum * this.permutationNum / queryThreadNum,
-          (i + 1) * this.tableNum * this.permutationNum / queryThreadNum))
+          (i + 1) * this.tableNum * this.permutationNum / queryThreadNum,
+          steps))
       }
     }
     queryThreadPool.shutdown()
@@ -337,10 +341,11 @@ private[mclab] object SingleFeatureRDFInit {
     * For system use
     *
     * @param querySVArray the query sparseVector array
+    * @param steps steps in multi parition search
     * @param queryThreadNum numebr of query thread
     * @return the similar objects (is the keys array, which save in dataTable)
     */
-  def NewMultiThreadQueryBatch(querySVArray:Array[SparseVector],queryThreadNum:Int):Array[Set[AnyRef]]={
+  def NewMultiThreadQueryBatch(querySVArray:Array[SparseVector],steps:Int,queryThreadNum:Int):Array[Set[AnyRef]]={
     //fit the new SparseVectors first, and get the keys array
     val (_,queryArray)=this.newMultiThreadFit(querySVArray,queryThreadNum)
     var flagQuery=true
@@ -354,7 +359,8 @@ private[mclab] object SingleFeatureRDFInit {
       for(i <- 0 until queryThreadNum){
         queryThreadPool.execute(new threadQuery(queryArray,
           i * this.tableNum * this.permutationNum / queryThreadNum,
-          (i + 1) * this.tableNum * this.permutationNum / queryThreadNum))
+          (i + 1) * this.tableNum * this.permutationNum / queryThreadNum,
+          steps))
       }
     }
     queryThreadPool.shutdown()
@@ -369,10 +375,10 @@ private[mclab] object SingleFeatureRDFInit {
 
 
 
-  private class threadQuery(queryArray:Array[Int],startTable:Int,endTable:Int)
+  private class threadQuery(queryArray:Array[Int],startTable:Int,endTable:Int,steps:Int=0)
     extends Runnable{
     override def run(): Unit = {
-      QueryTask.query(queryArray,startTable,endTable)
+      QueryTask.query(queryArray,startTable,endTable,steps)
     }
   }
 
@@ -382,12 +388,12 @@ private[mclab] object SingleFeatureRDFInit {
     *        2.if the result set is alreay exit in resultArray, do union operation, otherwise append a new one.
     */
   private object QueryTask{
-    def query(queryArray:Array[Int],startTable:Int,endTable:Int): Unit ={
+    def query(queryArray:Array[Int],startTable:Int,endTable:Int,steps:Int=0): Unit ={
         for (i <- queryArray.indices){
           var oneResultsSet = Set.empty[AnyRef]
           try {
             for (tableId <- startTable until endTable) {
-              oneResultsSet = oneResultsSet.union(SingleFeatureRDFInit.vectorDatabase(tableId).getSimilar(queryArray(i)).toArray().toSet)
+              oneResultsSet = oneResultsSet.union(SingleFeatureRDFInit.vectorDatabase(tableId).getSimilarWithStepWise(queryArray(i),steps).toArray().toSet)
             }
           } catch {
             case ex: NullPointerException => println("need to fit the data first")
@@ -431,16 +437,16 @@ private[mclab] object SingleFeatureRDFInit {
   /**
     * get the topK similar objects and calculate the precision based on ground truth
     * @param allDenseVectors the feature Data
-    * @param groundTruthFilename ground truth file name
+    * @param groundTruth ground truth data
     * @param conf configuration
+    * @param steps steps in multi parition search
     * @return (topK,precision)
     */
-  def topKAndPrecisionScore(allDenseVectors:Array[Array[Double]],groundTruthFilename:String,conf:Config):(Array[Array[Int]],Double)={
-    val groundTruth=this.getTopKGroundTruth(groundTruthFilename,conf.getInt("mclab.lsh.topK"))
+  def topKAndPrecisionScore(allDenseVectors:Array[Array[Double]],groundTruth:Array[Set[Int]],conf:Config,steps:Int=0):(Array[Array[Int]],Double)={
     val queryArray= groundTruth.indices.toArray
     var averageScore=0.0
     val allQueryedTopK=new ArrayBuffer[Array[Int]]
-    val resultsSet=this.NewMultiThreadQueryBatch(queryArray,conf.getInt("mclab.queryThreadNum"))
+    val resultsSet=this.NewMultiThreadQueryBatch(queryArray,steps,conf.getInt("mclab.queryThreadNum"))
     for (i <- resultsSet.indices) {
       var score=0.0
       if(resultsSet(i)!=Set.empty[AnyRef]){
@@ -459,7 +465,7 @@ private[mclab] object SingleFeatureRDFInit {
 //        println("For query " + (i) + ", the results are: ")
         val tmpOneQueryedTopK=new ArrayBuffer[Int]
         for (w <- indexList.indices) {
-          print(resultSetForOneQuery(indexList(w)) + ",")
+//          print(resultSetForOneQuery(indexList(w)) + ",")
           tmpOneQueryedTopK += resultSetForOneQuery(indexList(w)).toString.toInt
           if (groundTruth(i).contains(resultSetForOneQuery(indexList(w)).toString.toInt)) {
             score += 1

@@ -45,7 +45,7 @@ class TestSingleRDFSuite extends FunSuite with BeforeAndAfterAll {
     val timeB = System.currentTimeMillis()
     println("multiThread query time is " + (timeB - timeA) + "ms")
     val timeC = System.currentTimeMillis()
-    val resultArray_non = SingleFeatureRDFInit.queryBatch(queryArray)
+    val resultArray_non = SingleFeatureRDFInit.queryBatch(queryArray,0)
     val timeD = System.currentTimeMillis()
     println("non-multiThread query time is " + (timeD - timeC) + "ms")
     //check whether the results are the same!
@@ -62,26 +62,50 @@ class TestSingleRDFSuite extends FunSuite with BeforeAndAfterAll {
   }
 
   test("test the topK and precision") {
-    val allDenseVectors=SingleFeatureRDFInit.newMultiThreadFit("glove.twitter.27B/glove.twitter.27B.100d.20k.SparseVector.txt",TestSettings.testBaseConf)
+    val allDenseVectors = SingleFeatureRDFInit.newMultiThreadFit("glove.twitter.27B/glove.twitter.27B.100d.20k.SparseVector.txt", TestSettings.testBaseConf)
+    val groundTruth=SingleFeatureRDFInit.getTopKGroundTruth("glove.twitter.27B/glove.twitter.27B.100d.20k.groundtruth",
+      TestSettings.testBaseConf.getInt("mclab.lsh.topK"))
     val (topK, precision) = SingleFeatureRDFInit.topKAndPrecisionScore(allDenseVectors,
-      "glove.twitter.27B/glove.twitter.27B.100d.20k.groundtruth", TestSettings.testBaseConf)
+      groundTruth, TestSettings.testBaseConf)
     topK.foreach(x => println(x.toSet))
     println("The precision is " + precision)
   }
 
 
-  test("test getSimilar by using SparseVector,rather than key in dataTable"){
-    SingleFeatureRDFInit.newMultiThreadFit("glove.twitter.27B/glove.twitter.27B.100d.20k.SparseVector.txt",TestSettings.testBaseConf)
+  test("test NewMultiThreadQueryBatch by using SparseVector,rather than key in dataTable") {
+    SingleFeatureRDFInit.newMultiThreadFit("glove.twitter.27B/glove.twitter.27B.100d.20k.SparseVector.txt", TestSettings.testBaseConf)
     assert(SingleFeatureRDFInit.vectorIdToVector.size() == 20000)
 
-    val indices=Range(0,100).toArray
-    val values1=new Array[Double](100).map(_ => Random.nextDouble())
-    val values2=new Array[Double](100).map(_ => Random.nextDouble())
+    val indices = Range(0, 100).toArray
+    val values1 = new Array[Double](100).map(_ => Random.nextDouble())
+    val values2 = new Array[Double](100).map(_ => Random.nextDouble())
 
-    val x=SingleFeatureRDFInit.NewMultiThreadQueryBatch(Array(new SparseVector(0,100,indices,values1),
-      new SparseVector((0,100,indices,values2))),5)
-    for(item <- x)
+    val x = SingleFeatureRDFInit.NewMultiThreadQueryBatch(Array(new SparseVector(0, 100, indices, values1),
+      new SparseVector((0, 100, indices, values2))),0, 5)
+    for (item <- x)
       println(item)
-
   }
+
+  test("test getSimilarWithStepWise methods in RDF ") {
+    SingleFeatureRDFInit.newMultiThreadFit("glove.twitter.27B/glove.twitter.27B.100d.20k.SparseVector.txt", TestSettings.testBaseConf)
+    println("normal search, result number is " + SingleFeatureRDFInit.vectorDatabase(0).getSimilar(0).size())
+    println("step-0 search, result number is " + SingleFeatureRDFInit.vectorDatabase(0).getSimilarWithStepWise(0, 0).size())
+    println("step-1 search, result number is " + SingleFeatureRDFInit.vectorDatabase(0).getSimilarWithStepWise(0, 1).size())
+    println("Step-2 search, result number is " + SingleFeatureRDFInit.vectorDatabase(0).getSimilarWithStepWise(0, 2).size())
+  }
+
+  test("test performance of different steps"){
+    val allDenseVectors = SingleFeatureRDFInit.newMultiThreadFit("glove.twitter.27B/glove120k100dReverse.txt",
+      TestSettings.testBaseConf)
+    val groundTruth=SingleFeatureRDFInit.getTopKGroundTruth("glove.twitter.27B/glove100d120k.txtQueryAndTop10NNResult1200",
+      TestSettings.testBaseConf.getInt("mclab.lsh.topK"))
+    for(step <- 0 to TestSettings.testBaseConf.getInt("mclab.lsh.partitionBits")){
+      val timeA=System.currentTimeMillis()
+      val (topK, precision) = SingleFeatureRDFInit.topKAndPrecisionScore(allDenseVectors,
+        groundTruth, TestSettings.testBaseConf,step)
+      val timeB=System.currentTimeMillis()
+      println("for step=" +step+", The precision is " + precision + ". Time is "+ (timeB-timeA)/groundTruth.size.toDouble+"ms/per query")
+    }
+  }
+
 }

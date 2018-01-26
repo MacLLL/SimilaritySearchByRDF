@@ -538,7 +538,8 @@ public class RandomDrawTreeMap<K, V>
     }
 
     /**
-     * find the similar vector
+     * Todo the 1-step wise partition search adaptive
+     * find the similar vector by the key in dataTable
      * @param key the query vector id
      * @return the list of the similarity candidates
      */
@@ -584,6 +585,77 @@ public class RandomDrawTreeMap<K, V>
 //    return filter(lns,h);
         return lns;
     }
+
+    /**
+     * calculate the all sub-index within steps
+     * @param currentSubIndexID
+     * @param steps
+     * @return sub-index list within steps
+     */
+    private ArrayList<Integer> findStepWiseSubIndexIDs(final int currentSubIndexID,final int steps){
+        ArrayList<Integer> subIndexIDList=new ArrayList<>();
+        for(int subIndexID=0;subIndexID<partitioner.numPartitions;subIndexID++){
+            if(Integer.bitCount(subIndexID^currentSubIndexID)<=steps)
+                subIndexIDList.add(subIndexID);
+        }
+        return subIndexIDList;
+
+    }
+
+    /**
+     * Todo the 1-step wise partition search adaptive
+     * find the similar vector by the key in dataTable
+     * @param key the query vector id
+     * @return the list of the similarity candidates
+     */
+    public LinkedList<K> getSimilarWithStepWise(
+            final Object key, final int steps) {
+        //TODO: Finish getSimilar with steps partition search
+        //get hash value
+        final int h = hash((K) key);
+        //move to left BUCKET_LENGTH, then get the seg.
+        final int seg = h >>> BUCKET_LENGTH;
+        final int partition = partitioner.getPartition(
+                (K) (hasher instanceof LocalitySensitiveHasher ? h : key));
+        final ArrayList<Integer> allSubIndexs=findStepWiseSubIndexIDs(partition,steps);
+        LinkedList<K> finalLns=new LinkedList<>();
+        for(int i=0;i<allSubIndexs.size();i++) {
+            int currentPartition = allSubIndexs.get(i);
+            LinkedList<K> tmpLns;
+            try {
+                final Lock ramLock = partitionRamLock.get(currentPartition)[seg].readLock();
+                try {
+                    ramLock.lock();
+                    tmpLns = getInnerWithSimilarity(key, seg, h, currentPartition);
+                } finally {
+                    ramLock.unlock();
+                }
+                if (tmpLns == null || tmpLns.size() == 0 && persistedStorages.containsKey(currentPartition)) {
+                    final Lock persistLock = partitionPersistLock.get(currentPartition)[seg].readLock();
+                    try {
+                        persistLock.lock();
+                        tmpLns = fetchFromPersistedStorageWithSimilarity(
+                                key,
+                                currentPartition,
+                                partitionRootRec.get(currentPartition)[seg],
+                                h);
+                    } finally {
+                        persistLock.unlock();
+                    }
+                }
+            } catch (NullPointerException npe) {
+                //npe.printStackTrace();
+                tmpLns=null;
+            }
+            if(tmpLns!=null)
+                finalLns.addAll(tmpLns);
+        }
+        if (finalLns == null)
+            return null;
+        return finalLns;
+    }
+
+
 
     /**
      * for multiFeature
@@ -744,11 +816,11 @@ public class RandomDrawTreeMap<K, V>
             if (recId == 0) {
                 //no such node, empty
                 //search from persisted storage for the directory
-                System.out.println("met a rec with 0, level: " + level + " hash: " + h);
-                int[] dir1 = (int[]) dir;
-                for (int i = 0; i < dir1.length; i++) {
-                    System.out.println(dir1[i]);
-                }
+//                System.out.println("met a rec with 0, level: " + level + " hash: " + h);
+//                int[] dir1 = (int[]) dir;
+//                for (int i = 0; i < dir1.length; i++) {
+//                    System.out.println(dir1[i]);
+//                }
                 return null;
             }
             //last bite indicates if referenced record is LinkedNode
@@ -1266,7 +1338,7 @@ public class RandomDrawTreeMap<K, V>
 
     /***
      * calculate the hash value, which is depended on the HashName
-     * @param key
+     * @param key the key of object in dataTable
      * @return
      */
 
@@ -1285,6 +1357,7 @@ public class RandomDrawTreeMap<K, V>
             return hasher.hash(key, keySerializer);
         }
     }
+
 
     /***
      * For multi feature when test dataset CC_WEB_VIDEO
@@ -1316,6 +1389,7 @@ public class RandomDrawTreeMap<K, V>
             return hasher.hash(key, keySerializer);
         }
     }
+
 
     /**
      * get each size of sub-index
