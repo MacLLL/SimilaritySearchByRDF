@@ -11,6 +11,7 @@ import mclab.lsh.Hasher;
 import mclab.lsh.LocalitySensitiveHasher;
 import mclab.lsh.vector.SparseVector;
 import mclab.utils.Serializers;
+import scala.Array;
 import scala.collection.mutable.StringBuilder;
 import mclab.deploy.HashTableInit;
 
@@ -21,7 +22,7 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.logging.Logger;
 
-@SuppressWarnings({ "unchecked", "rawtypes" })
+@SuppressWarnings({"unchecked", "rawtypes"})
 public class RandomDrawTreeMap<K, V>
         extends AbstractMap<K, V>
         implements ConcurrentMap<K, V>,
@@ -98,12 +99,12 @@ public class RandomDrawTreeMap<K, V>
     /**
      * It indicate whether certain sub-index is initalized
      */
-    protected boolean defaultMapDBInitialized[]= null;
+    protected boolean defaultMapDBInitialized[] = null;
 
     /**
      * keep the number of objects in each sub-index
      */
-    private int[] numberOfObjectsInEachPartition=null;
+    private int[] numberOfObjectsInEachPartition = null;
 
     /**
      * Indicates if this collection collection was not made by DB by user.
@@ -172,6 +173,7 @@ public class RandomDrawTreeMap<K, V>
         public final long next;
         public final K key;
         public final V value;
+
         public LinkedNode(final long next, final K key, final V value) {
             if (CC.ASSERT && next >>> 48 != 0)
                 throw new DBException.DataCorruption("next recid too big");
@@ -183,13 +185,14 @@ public class RandomDrawTreeMap<K, V>
 
     /**
      * only for test(means can be deleted)
+     *
      * @return no mean
      */
-    public void getAllRootRecIdForEachSegment(){
+    public void getAllRootRecIdForEachSegment() {
         for (int i = 0; i < partitionRootRec.size(); i++) {
-            System.out.println("partition #" + i +"has" + partitionRootRec.get(i) );
-            for (long x: partitionRootRec.get(i)) {
-                System.out.print(x+",");
+            System.out.println("partition #" + i + "has" + partitionRootRec.get(i));
+            for (long x : partitionRootRec.get(i)) {
+                System.out.print(x + ",");
             }
             System.out.println();
         }
@@ -200,40 +203,44 @@ public class RandomDrawTreeMap<K, V>
      */
     protected final Serializer<RandomDrawTreeMap.LinkedNode<K, V>> LN_SERIALIZER =
             new Serializer<RandomDrawTreeMap.LinkedNode<K, V>>() {
-        /** used to check that every 64000 th element has consistent has before and after (de)serialization*/
-        int serCounter = 0;
-        @Override
-        public void serialize(DataOutput out, RandomDrawTreeMap.LinkedNode<K, V> value) throws IOException {
-            if (((serCounter++) & 0xFFFF) == 0) {
-                assertHashConsistent(value.key);
-            }
-            DataIO.packLong(out, value.next);
-            keySerializer.serialize(out, value.key);
-            if (hasValues) {
-                valueSerializer.serialize(out, value.value);
-            }
-        }
-        @Override
-        public RandomDrawTreeMap.LinkedNode<K, V> deserialize(DataInput in, int available) throws IOException {
-            if (CC.ASSERT && available == 0)
-                throw new AssertionError();
-            return new RandomDrawTreeMap.LinkedNode<K, V>(
-                    DataIO.unpackLong(in),
-                    keySerializer.deserialize(in, -1),
-                    //here we find for No serialized value, we treat the value default as Boolean
-                    //so when we put the key into this map, we put the pair like (key, boolean)
-                    //this is the reason why we put (key,true) in hashTable in the Test
-                    hasValues ? valueSerializer.deserialize(in, -1) : (V) Boolean.TRUE
-            );
-        }
-        @Override
-        public boolean isTrusted() {
-            return keySerializer.isTrusted() && valueSerializer.isTrusted();
-        }
-    };
+                /** used to check that every 64000 th element has consistent has before and after (de)serialization*/
+                int serCounter = 0;
+
+                @Override
+                public void serialize(DataOutput out, RandomDrawTreeMap.LinkedNode<K, V> value) throws IOException {
+                    if (((serCounter++) & 0xFFFF) == 0) {
+                        assertHashConsistent(value.key);
+                    }
+                    DataIO.packLong(out, value.next);
+                    keySerializer.serialize(out, value.key);
+                    if (hasValues) {
+                        valueSerializer.serialize(out, value.value);
+                    }
+                }
+
+                @Override
+                public RandomDrawTreeMap.LinkedNode<K, V> deserialize(DataInput in, int available) throws IOException {
+                    if (CC.ASSERT && available == 0)
+                        throw new AssertionError();
+                    return new RandomDrawTreeMap.LinkedNode<K, V>(
+                            DataIO.unpackLong(in),
+                            keySerializer.deserialize(in, -1),
+                            //here we find for No serialized value, we treat the value default as Boolean
+                            //so when we put the key into this map, we put the pair like (key, boolean)
+                            //this is the reason why we put (key,true) in hashTable in the Test
+                            hasValues ? valueSerializer.deserialize(in, -1) : (V) Boolean.TRUE
+                    );
+                }
+
+                @Override
+                public boolean isTrusted() {
+                    return keySerializer.isTrusted() && valueSerializer.isTrusted();
+                }
+            };
 
     /**
      * To check the consistent of the key-value pairs before and after serialize and deserialize
+     *
      * @param key
      * @throws IOException
      */
@@ -258,6 +265,7 @@ public class RandomDrawTreeMap<K, V>
                     key.getClass());
         }
     }
+
 
     /**
      * Serializer for Dir[4], which keeps the BitMap for directory node in indexing structure
@@ -298,6 +306,7 @@ public class RandomDrawTreeMap<K, V>
                 out2.packLong(c[i]);
             }
         }
+
         //TODO:implement long, we plan to do it in the future
         private void serializeLong(DataIO.DataOutputByteArray out, Object value) throws IOException {
       /*
@@ -352,13 +361,15 @@ public class RandomDrawTreeMap<K, V>
             in2.unpackIntArray(ret, BITMAP_SIZE + 1, len);
             return ret;
         }
+
         @Override
         public boolean isTrusted() {
             return true;
         }
     };
 
-    /** valueCreator: if there is no record in the map, create a value to return
+    /**
+     * valueCreator: if there is no record in the map, create a value to return
      * Opens RandomDrawTreeMap
      */
     public RandomDrawTreeMap(
@@ -392,17 +403,18 @@ public class RandomDrawTreeMap<K, V>
         this.keySerializer = keySerializer;
         this.valueSerializer = valueSerializer;
         this.valueCreator = valueCreator;
-        this.defaultMapDBInitialized=new boolean[partitioner.numPartitions];
+        this.defaultMapDBInitialized = new boolean[partitioner.numPartitions];
 
         this.executor = executor;
 
         this.ramThreshold = ramThreshold;
 
-        this.numberOfObjectsInEachPartition=new int[partitioner.numPartitions];
+        this.numberOfObjectsInEachPartition = new int[partitioner.numPartitions];
     }
 
     /**
      * Set the hasher
+     *
      * @param hasherName two types, lsh and default
      * @return hasher
      */
@@ -417,6 +429,7 @@ public class RandomDrawTreeMap<K, V>
 
     /**
      * In the experiment, BUCKET_LENGTH=28, the total length of hash value is 32, So SEG is 2^4=16.
+     *
      * @param bucketLength
      */
     public void updateBucketLength(int bucketLength) {
@@ -426,6 +439,7 @@ public class RandomDrawTreeMap<K, V>
 
     /**
      * update the d-node size and length of hash value
+     *
      * @param newNodeSize
      * @param totalHashLength
      */
@@ -459,6 +473,7 @@ public class RandomDrawTreeMap<K, V>
 
     /**
      * return the number of objects in certain partition
+     *
      * @param partitionId
      * @return
      */
@@ -482,6 +497,7 @@ public class RandomDrawTreeMap<K, V>
 
     /**
      * return the count of all partitions
+     *
      * @return
      */
     public long sizeLong() {
@@ -540,6 +556,7 @@ public class RandomDrawTreeMap<K, V>
     /**
      * Todo the 1-step wise partition search adaptive
      * find the similar vector by the key in dataTable
+     *
      * @param key the query vector id
      * @return the list of the similarity candidates
      */
@@ -588,14 +605,15 @@ public class RandomDrawTreeMap<K, V>
 
     /**
      * calculate the all sub-index within steps
+     *
      * @param currentSubIndexID
      * @param steps
      * @return sub-index list within steps
      */
-    private ArrayList<Integer> findStepWiseSubIndexIDs(final int currentSubIndexID,final int steps){
-        ArrayList<Integer> subIndexIDList=new ArrayList<>();
-        for(int subIndexID=0;subIndexID<partitioner.numPartitions;subIndexID++){
-            if(Integer.bitCount(subIndexID^currentSubIndexID)<=steps)
+    private ArrayList<Integer> findStepWiseSubIndexIDs(final int currentSubIndexID, final int steps) {
+        ArrayList<Integer> subIndexIDList = new ArrayList<>();
+        for (int subIndexID = 0; subIndexID < partitioner.numPartitions; subIndexID++) {
+            if (Integer.bitCount(subIndexID ^ currentSubIndexID) <= steps)
                 subIndexIDList.add(subIndexID);
         }
         return subIndexIDList;
@@ -605,6 +623,7 @@ public class RandomDrawTreeMap<K, V>
     /**
      * Todo the 1-step wise partition search adaptive
      * find the similar vector by the key in dataTable
+     *
      * @param key the query vector id
      * @return the list of the similarity candidates
      */
@@ -617,9 +636,9 @@ public class RandomDrawTreeMap<K, V>
         final int seg = h >>> BUCKET_LENGTH;
         final int partition = partitioner.getPartition(
                 (K) (hasher instanceof LocalitySensitiveHasher ? h : key));
-        final ArrayList<Integer> allSubIndexs=findStepWiseSubIndexIDs(partition,steps);
-        LinkedList<K> finalLns=new LinkedList<>();
-        for(int i=0;i<allSubIndexs.size();i++) {
+        final ArrayList<Integer> allSubIndexs = findStepWiseSubIndexIDs(partition, steps);
+        LinkedList<K> finalLns = new LinkedList<>();
+        for (int i = 0; i < allSubIndexs.size(); i++) {
             int currentPartition = allSubIndexs.get(i);
             LinkedList<K> tmpLns;
             try {
@@ -645,9 +664,9 @@ public class RandomDrawTreeMap<K, V>
                 }
             } catch (NullPointerException npe) {
                 //npe.printStackTrace();
-                tmpLns=null;
+                tmpLns = null;
             }
-            if(tmpLns!=null)
+            if (tmpLns != null)
                 finalLns.addAll(tmpLns);
         }
         if (finalLns == null)
@@ -656,17 +675,17 @@ public class RandomDrawTreeMap<K, V>
     }
 
 
-
     /**
      * for multiFeature
+     *
      * @param key
      * @return
      */
     public LinkedList<K> getSimilar(
-            final Object key,int flag) {
+            final Object key, int flag) {
         //TODO: Finish getSimilar
         //get hash value
-        final int h = hash((K) key,flag);
+        final int h = hash((K) key, flag);
         //move to left BUCKET_LENGTH, then get the seg.
         final int seg = h >>> BUCKET_LENGTH;
         final int partition = partitioner.getPartition(
@@ -707,17 +726,18 @@ public class RandomDrawTreeMap<K, V>
 
     /**
      * filter the candidiates by using similaritythreshold, cost too much time
+     *
      * @param ln
      * @param QueryHashvalue
      * @return
      */
-    private LinkedList<K> filter(LinkedList<K> ln,int QueryHashvalue){
-        LinkedList<K> filteredLns=new LinkedList<>();
-        int SimilarityThreshold=3;
-        if(ln.size()!=0){
-            for(K x : ln){
-                final int hash_of_x=hash((K) x);
-                if(Integer.bitCount(hash_of_x^QueryHashvalue) <= SimilarityThreshold){
+    private LinkedList<K> filter(LinkedList<K> ln, int QueryHashvalue) {
+        LinkedList<K> filteredLns = new LinkedList<>();
+        int SimilarityThreshold = 3;
+        if (ln.size() != 0) {
+            for (K x : ln) {
+                final int hash_of_x = hash((K) x);
+                if (Integer.bitCount(hash_of_x ^ QueryHashvalue) <= SimilarityThreshold) {
                     filteredLns.add(x);
                 }
             }
@@ -853,6 +873,7 @@ public class RandomDrawTreeMap<K, V>
 
     /**
      * search the exact object in index
+     *
      * @param key
      * @param engine
      * @param recId
@@ -925,7 +946,7 @@ public class RandomDrawTreeMap<K, V>
             }
         }
         LinkedList<K> l = new LinkedList<K>();
-        for (K k: ret) {
+        for (K k : ret) {
             l.add(k);
         }
         return l;
@@ -953,6 +974,7 @@ public class RandomDrawTreeMap<K, V>
 
     /**
      * Get the similar objects from innner.
+     *
      * @param key
      * @param seg
      * @param h
@@ -978,6 +1000,7 @@ public class RandomDrawTreeMap<K, V>
 
     /**
      * get the exact same object
+     *
      * @param key
      * @param seg
      * @param h
@@ -1020,6 +1043,7 @@ public class RandomDrawTreeMap<K, V>
 
     /**
      * take the recid from dir[4] in certain position, dir can be incremental extended.
+     *
      * @param dir
      * @param pos
      * @return the recid
@@ -1032,6 +1056,7 @@ public class RandomDrawTreeMap<K, V>
 
     /**
      * known the dir[] and slot, get the recid
+     *
      * @param dir
      * @param slot
      * @return
@@ -1055,6 +1080,7 @@ public class RandomDrawTreeMap<K, V>
 
     /**
      * check whether the dir[] of certain slot(from 0 to 127) is empty(0->empty, 1->hasSet)
+     *
      * @param dir
      * @param slot
      * @return the slot which can indicate recid
@@ -1071,14 +1097,13 @@ public class RandomDrawTreeMap<K, V>
      *
      * @param dir  dir is the index in dir node, the first 4 * 32 bits is the bitmap
      *             [0][1][2][3], inside the [0], the first one is from right.
-     *
      * @param slot slot is NUM_BITS_PER_COMPARISON-bits of the hash value of the key,
      *             indicating the slot in this level
      * @return negative -offset if the slot hasn't been occupied, positive offset if the slot is set
      */
     protected final int dirOffsetFromSlot(int[] dir, int slot) {
         if (CC.ASSERT && slot > DIRECTORY_NODE_SIZE - 1)
-            throw new DBException.DataCorruption("slot " + slot +  " too high");
+            throw new DBException.DataCorruption("slot " + slot + " too high");
         //the bitmap is divided into BITMAP_SIZE * 32 bits, the highest few bits indicate which range
         //this slot belongs to, 00 in first, 01 in second, 10 in third, 11 in last
         int rangeDecidingBits = NUM_BITS_PER_COMPARISON - (int) (Math.log(BITMAP_SIZE) / Math.log(2));
@@ -1088,7 +1113,7 @@ public class RandomDrawTreeMap<K, V>
             bitmapRange = slot >>> rangeDecidingBits;
         }
         //calculate the slot in range
-        int slotWithinRange = slot & (int)(Math.pow(2, rangeDecidingBits) - 1);
+        int slotWithinRange = slot & (int) (Math.pow(2, rangeDecidingBits) - 1);
 
         //check if bit at given slot is set
         //get dir[bitmapRange] is 32 bits,
@@ -1218,6 +1243,7 @@ public class RandomDrawTreeMap<K, V>
 
     /**
      * remove the slot in dir
+     *
      * @param dir
      * @param slot
      * @return
@@ -1259,6 +1285,7 @@ public class RandomDrawTreeMap<K, V>
 
     /**
      * initialize the Store layer, for off-heap storage
+     *
      * @param partitionId
      * @param lockScale
      * @return
@@ -1274,6 +1301,7 @@ public class RandomDrawTreeMap<K, V>
 
     /**
      * init each partition's engine,rootrec and counter of each rec, every time ,it needs to use 8 long
+     *
      * @param partitionId
      */
     private void initPartition(int partitionId) {
@@ -1301,9 +1329,9 @@ public class RandomDrawTreeMap<K, V>
 //      partitionRootRec.put(pId, segIds);
 //      counterRecids.put(pId, counterRecIdArray);
 //    }
-        engines.put(partitionId,store);
-        partitionRootRec.put(partitionId,segIds);
-        counterRecids.put(partitionId,counterRecIdArray);
+        engines.put(partitionId, store);
+        partitionRootRec.put(partitionId, segIds);
+        counterRecids.put(partitionId, counterRecIdArray);
     }
 
     protected String buildStorageName(int partitionId, int segId) {
@@ -1325,8 +1353,8 @@ public class RandomDrawTreeMap<K, V>
                     persistLockArray[i] = new ReentrantReadWriteLock();
                 }
                 //only when each partition is going to be used, we initialize it.
-                partitionRamLock.put(partitionId,ramLockArray);
-                partitionPersistLock.put(partitionId,persistLockArray);
+                partitionRamLock.put(partitionId, ramLockArray);
+                partitionPersistLock.put(partitionId, persistLockArray);
                 defaultMapDBInitialized[partitionId] = true;
             }
         } catch (Exception e) {
@@ -1338,6 +1366,7 @@ public class RandomDrawTreeMap<K, V>
 
     /***
      * calculate the hash value, which is depended on the HashName
+     *
      * @param key the key of object in dataTable
      * @return
      */
@@ -1361,21 +1390,22 @@ public class RandomDrawTreeMap<K, V>
 
     /***
      * For multi feature when test dataset CC_WEB_VIDEO
+     *
      * @param key
      * @param flag
      * @return
      */
 
-    public int hash(final K key,int flag) {
+    public int hash(final K key, int flag) {
         if (hasher instanceof LocalitySensitiveHasher) {
             // the hasher is the locality sensitive hasher, where we need to calculate the hash of the
             // vector instead of the key value
-            SparseVector v=null;
-            if(flag==1){
+            SparseVector v = null;
+            if (flag == 1) {
                 v = HashTableInit.vectorIdToVector_blue().get(key);
-            }else if(flag==2){
+            } else if (flag == 2) {
                 v = HashTableInit.vectorIdToVector_green().get(key);
-            }else if(flag==3){
+            } else if (flag == 3) {
                 v = HashTableInit.vectorIdToVector_red().get(key);
             }
             if (v == null) {
@@ -1399,6 +1429,7 @@ public class RandomDrawTreeMap<K, V>
             System.out.println("Partition " + i + " has " + numberOfObjectsInEachPartition[i] + " objects.");
         }
     }
+
     @Override
     public V put(final K key, final V value) {
 
@@ -1414,7 +1445,7 @@ public class RandomDrawTreeMap<K, V>
         final int partition = partitioner.getPartition(
                 (K) (hasher instanceof LocalitySensitiveHasher ? h : key));
         initPartitionIfNecessary(partition);
-        if(hasher instanceof LocalitySensitiveHasher)
+        if (hasher instanceof LocalitySensitiveHasher)
             numberOfObjectsInEachPartition[partition]++;
         try {
             partitionRamLock.get(partition)[seg].writeLock().lock();
@@ -1430,12 +1461,13 @@ public class RandomDrawTreeMap<K, V>
 
     /***
      * for multi feature
+     *
      * @param key
      * @param value
      * @param flag
      * @return
      */
-    public V put(final K key, final V value,int flag) {
+    public V put(final K key, final V value, int flag) {
         if (key == null)
             throw new IllegalArgumentException("null key");
 
@@ -1443,7 +1475,7 @@ public class RandomDrawTreeMap<K, V>
             throw new IllegalArgumentException("null value");
 
         V ret;
-        final int h = hash(key,flag);
+        final int h = hash(key, flag);
         final int seg = h >>> BUCKET_LENGTH;
         final int partition = partitioner.getPartition(
                 (K) (hasher instanceof LocalitySensitiveHasher ? h : key));
@@ -1475,7 +1507,7 @@ public class RandomDrawTreeMap<K, V>
      * @return null if the corresponding kv pair doesn't exist, otherwise return the existing value
      */
     protected V putInner(K key, V value, int h, int partition) {
-        int seg = h>>> BUCKET_LENGTH;
+        int seg = h >>> BUCKET_LENGTH;
         long dirRecid = partitionRootRec.get(partition)[seg];
         Engine engine = engines.get(partition);
 
@@ -1494,7 +1526,7 @@ public class RandomDrawTreeMap<K, V>
             //dirOffset - the offset with in a dir
             final int dirOffset = dirOffsetFromSlot(dir, slot);
             int bucketConflictCost = 0; // the threshold number of objects in this level
-            long recid = dirOffset < 0 ? 0 : dirGet(dir,dirOffset);
+            long recid = dirOffset < 0 ? 0 : dirGet(dir, dirOffset);
             if (recid != 0) {
                 //the record id has existed
                 if ((recid & 1) == 0) {
@@ -1606,12 +1638,13 @@ public class RandomDrawTreeMap<K, V>
 
     /**
      * count the number in each seg of sub-index
+     *
      * @param partition
      * @param seg
      * @param engine
      * @param plus
      */
-    protected void counter(int partition, int seg,  Engine engine, int plus) {
+    protected void counter(int partition, int seg, Engine engine, int plus) {
         if (counterRecids == null) {
             return;
         }
@@ -1623,6 +1656,7 @@ public class RandomDrawTreeMap<K, V>
 
     /**
      * remove the object in index
+     *
      * @param key
      * @return
      */
@@ -2064,9 +2098,6 @@ public class RandomDrawTreeMap<K, V>
     }
 
 
-
-
-
     abstract class HashIterator {
 
         protected LinkedNode[] currentLinkedList;
@@ -2169,6 +2200,7 @@ public class RandomDrawTreeMap<K, V>
             }
             return null;
         }
+
         private LinkedNode[] findNextLinkedNodeRecur(
                 Engine engine,
                 long dirRecid,
@@ -2305,6 +2337,7 @@ public class RandomDrawTreeMap<K, V>
 
     /**
      * put the kv pair if it does not exist in the map
+     *
      * @param key
      * @param value
      * @return
@@ -2408,6 +2441,7 @@ public class RandomDrawTreeMap<K, V>
 
     /**
      * get all the engines
+     *
      * @return
      */
     public Collection<Engine> getEngine() {
@@ -2453,7 +2487,7 @@ public class RandomDrawTreeMap<K, V>
             int partition = keyIterator.next();
             snapshots.put(partition, TxEngine.createSnapshotFor(engines.get(partition)));
         }
-        return new RandomDrawTreeMap<K,V>(
+        return new RandomDrawTreeMap<K, V>(
                 tableId,
                 hasherName,
                 workingDirectory,
@@ -2503,6 +2537,7 @@ public class RandomDrawTreeMap<K, V>
 
     /**
      * lock the parition
+     *
      * @param partitionId
      * @return
      */
@@ -2520,6 +2555,7 @@ public class RandomDrawTreeMap<K, V>
 
     /**
      * save the index into disk(SSD)
+     *
      * @param partitionId
      */
     public void runPersistTask(final int partitionId) {
@@ -2529,40 +2565,40 @@ public class RandomDrawTreeMap<K, V>
         }
         if (executor != null) {
             executor.execute(new Runnable() {
-            @Override
-             public void run() {
-            //TODO: we can use snapshot to allow concurrent write threads
-                long persistTimestamp = System.currentTimeMillis();
-                if (!tryLockPartition(partitionId)) {
-                    //persist is ongoing
-                    return;
+                @Override
+                public void run() {
+                    //TODO: we can use snapshot to allow concurrent write threads
+                    long persistTimestamp = System.currentTimeMillis();
+                    if (!tryLockPartition(partitionId)) {
+                        //persist is ongoing
+                        return;
+                    }
+                    try {
+                        StoreSegment engine = (StoreSegment) engines.get(partitionId);
+                        //engine.compact();
+                        String unionDir = workingDirectory + "/" + name + "/" + partitionId;
+                        File dir = new File(unionDir);
+                        dir.mkdirs();
+                        long startTime = System.nanoTime();
+                        Store persistStorage = engine.persist(unionDir + "/" + persistTimestamp);
+                        addPersistedStorage(partitionId, persistTimestamp, (StoreAppend) persistStorage);
+                        long dataSummaryStartTime = System.nanoTime();
+                        generateDataSummary(partitionId);
+                        long dataSummaryEndTime = System.nanoTime();
+                        long endTime = System.nanoTime();
+                        long totalDuration = endTime - startTime;
+                        long dataSummaryDuration = dataSummaryEndTime - dataSummaryStartTime;
+                        System.out.println(totalDuration + " " + dataSummaryDuration);
+                        initPartition(partitionId);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    } finally {
+                        releaseAllLocksOfPartition(partitionId);
+                    }
                 }
-                try {
-                    StoreSegment engine = (StoreSegment) engines.get(partitionId);
-                    //engine.compact();
-                    String unionDir = workingDirectory + "/" + name + "/" + partitionId;
-                    File dir = new File(unionDir);
-                    dir.mkdirs();
-                    long startTime = System.nanoTime();
-                    Store persistStorage = engine.persist(unionDir + "/" + persistTimestamp);
-                    addPersistedStorage(partitionId, persistTimestamp, (StoreAppend) persistStorage);
-                    long dataSummaryStartTime = System.nanoTime();
-                    generateDataSummary(partitionId);
-                    long dataSummaryEndTime = System.nanoTime();
-                    long endTime = System.nanoTime();
-                    long totalDuration = endTime - startTime;
-                    long dataSummaryDuration = dataSummaryEndTime - dataSummaryStartTime;
-                    System.out.println(totalDuration + " " + dataSummaryDuration);
-                    initPartition(partitionId);
-                } catch (Exception e) {
-                    e.printStackTrace();
-                } finally {
-                    releaseAllLocksOfPartition(partitionId);
-                }
-              }
-             });
-            } else {
-             LOG.warning("executor is null, rejecting to persist");
+            });
+        } else {
+            LOG.warning("executor is null, rejecting to persist");
         }
     }
 
@@ -2590,8 +2626,26 @@ public class RandomDrawTreeMap<K, V>
         for (int i = 0; i < structureLockScale; i++) {
             structureLocks.put(i, new ReentrantReadWriteLock());
         }
+        //whether do this is depends
+        for (int i = 0; i < partitioner.numPartitions; i++) {
+            initPartitionIfNecessary(i);
+        }
     }
 
 
+    /**
+     * return a list of objects percentage for each subIndexID
+     *
+     * @return
+     */
+    public List<Double> allSubIndexObjectsNumberDistribution() {
+        long totalNum = sizeLong();
+        List<Double> numList = new ArrayList<>(partitioner.numPartitions);
+        for (int subIndexID = 0; subIndexID < partitioner.numPartitions; subIndexID++) {
+            double tmp = sizeLong(subIndexID) / (totalNum * 1.0);
+            numList.add(tmp);
+        }
+        return numList;
 
+    }
 }

@@ -31,8 +31,8 @@ private[mclab] object TestSettings {
        |mclab.dataTable.dirNodeSize=32
        |mclab.lshTable.chainLength = 32
        |mclab.dataTable.chainLength = 32
-       |mclab.dataTable.numPartitions=1
-       |mclab.lsh.partitionBits=4
+       |mclab.dataTable.numPartitions=4
+       |mclab.lsh.partitionBits=2
        |mclab.lsh.partitionBitsGenerateMethod="default"
        |
        |mclab.lsh.ramThreshold=2147483647
@@ -40,8 +40,6 @@ private[mclab] object TestSettings {
        |mclab.insertThreadNum=10
        |mclab.queryThreadNum=5
        |mclab.lsh.topK = 10
-       |
-       |
        |
        |
        |cpslab.lsh.plsh.benchmark.expDuration=0

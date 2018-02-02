@@ -45,7 +45,7 @@ class TestSingleRDFSuite extends FunSuite with BeforeAndAfterAll {
     val timeB = System.currentTimeMillis()
     println("multiThread query time is " + (timeB - timeA) + "ms")
     val timeC = System.currentTimeMillis()
-    val resultArray_non = SingleFeatureRDFInit.queryBatch(queryArray,0)
+    val resultArray_non = SingleFeatureRDFInit.queryBatch(queryArray, 0)
     val timeD = System.currentTimeMillis()
     println("non-multiThread query time is " + (timeD - timeC) + "ms")
     //check whether the results are the same!
@@ -63,7 +63,7 @@ class TestSingleRDFSuite extends FunSuite with BeforeAndAfterAll {
 
   test("test the topK and precision") {
     val allDenseVectors = SingleFeatureRDFInit.newMultiThreadFit("glove.twitter.27B/glove.twitter.27B.100d.20k.SparseVector.txt", TestSettings.testBaseConf)
-    val groundTruth=SingleFeatureRDFInit.getTopKGroundTruth("glove.twitter.27B/glove.twitter.27B.100d.20k.groundtruth",
+    val groundTruth = SingleFeatureRDFInit.getTopKGroundTruth("glove.twitter.27B/glove.twitter.27B.100d.20k.groundtruth",
       TestSettings.testBaseConf.getInt("mclab.lsh.topK"))
     val (topK, precision) = SingleFeatureRDFInit.topKAndPrecisionScore(allDenseVectors,
       groundTruth, TestSettings.testBaseConf)
@@ -81,7 +81,7 @@ class TestSingleRDFSuite extends FunSuite with BeforeAndAfterAll {
     val values2 = new Array[Double](100).map(_ => Random.nextDouble())
 
     val x = SingleFeatureRDFInit.NewMultiThreadQueryBatch(Array(new SparseVector(0, 100, indices, values1),
-      new SparseVector((0, 100, indices, values2))),0, 5)
+      new SparseVector((0, 100, indices, values2))), 0, 5)
     for (item <- x)
       println(item)
   }
@@ -94,18 +94,30 @@ class TestSingleRDFSuite extends FunSuite with BeforeAndAfterAll {
     println("Step-2 search, result number is " + SingleFeatureRDFInit.vectorDatabase(0).getSimilarWithStepWise(0, 2).size())
   }
 
-  test("test performance of different steps"){
+  test("test performance of different steps") {
     val allDenseVectors = SingleFeatureRDFInit.newMultiThreadFit("glove.twitter.27B/glove120k100dReverse.txt",
       TestSettings.testBaseConf)
-    val groundTruth=SingleFeatureRDFInit.getTopKGroundTruth("glove.twitter.27B/glove100d120k.txtQueryAndTop10NNResult1200",
+    val groundTruth = SingleFeatureRDFInit.getTopKGroundTruth("glove.twitter.27B/glove100d120k.txtQueryAndTop10NNResult1200",
       TestSettings.testBaseConf.getInt("mclab.lsh.topK"))
-    for(step <- 0 to TestSettings.testBaseConf.getInt("mclab.lsh.partitionBits")){
-      val timeA=System.currentTimeMillis()
+    for (step <- 0 to TestSettings.testBaseConf.getInt("mclab.lsh.partitionBits")) {
+      val timeA = System.currentTimeMillis()
       val (topK, precision) = SingleFeatureRDFInit.topKAndPrecisionScore(allDenseVectors,
-        groundTruth, TestSettings.testBaseConf,step)
-      val timeB=System.currentTimeMillis()
-      println("for step=" +step+", The precision is " + precision + ". Time is "+ (timeB-timeA)/groundTruth.size.toDouble+"ms/per query")
+        groundTruth, TestSettings.testBaseConf, step)
+      val timeB = System.currentTimeMillis()
+      println("for step=" + step + ", The precision is " + precision + ". Time is " + (timeB - timeA) / groundTruth.size.toDouble + "ms/per query")
     }
   }
+  test("test number of objects in sub-indexes distribution") {
+    SingleFeatureRDFInit.newMultiThreadFit("glove.twitter.27B/glove.twitter.27B.100d.20k.SparseVector.txt",
+      TestSettings.testBaseConf)
+    //see the dataTable distribution, since it's default hash salt, each sub-index has the same percentage
+    //but the hashTable distribution are different
+    val (dtDistribution, htDistribution) = SingleFeatureRDFInit.getDtAndHtDifSubIndexObjectsNumDistribution()
+    print("dataTable distribution: ")
+    dtDistribution.foreach(x => print(x*100 + "% "))
+    println("\nhashTable distribution: ")
+    htDistribution.foreach(x => print(x*100 + "% "))
+  }
+
 
 }
