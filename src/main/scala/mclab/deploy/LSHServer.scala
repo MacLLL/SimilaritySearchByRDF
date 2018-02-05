@@ -7,5 +7,8 @@ private[mclab] object LSHServer {
   var lshEngine: LSH = null
 
   def getLSHEngine = lshEngine
+
+
+
 }
 

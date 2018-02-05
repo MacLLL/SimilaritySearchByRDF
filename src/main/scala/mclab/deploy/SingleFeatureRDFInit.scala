@@ -1,6 +1,5 @@
 package mclab.deploy
 
-import java.util
 
 import breeze.linalg._
 import java.util.concurrent.{ExecutorService, Executors}
@@ -11,8 +10,6 @@ import mclab.lsh.vector.{SparseVector, Vectors}
 import mclab.mapdb.RandomDrawTreeMap
 import mclab.utils.{HashPartitioner, LocalitySensitivePartitioner, Serializers}
 import mclab.lsh.LSH
-import java.util.List
-
 import scala.collection.mutable.{ArrayBuffer, ListBuffer}
 import scala.io.Source
 
@@ -493,7 +490,7 @@ private[mclab] object SingleFeatureRDFInit {
     * get the dataTable and hashTable average distribution of number of objects in different sub-index
     * @return
     */
-  def getDtAndHtDifSubIndexObjectsNumDistribution(): (Array[Double], Array[Double]) = {
+  def getDtAndHtNumDistribution(): (Array[Double], Array[Double]) = {
     val dtDistribution:Array[Double]= new Array(dataTableNumOfSubIndex)
     var htDistribution:Array[Double]= new Array(hashTableNumOfSubIndex)
     if (this.vectorIdToVector != null){

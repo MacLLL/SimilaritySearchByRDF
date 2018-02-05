@@ -29,3 +29,6 @@ libraryDependencies ++= Seq(
   "com.google.guava" % "guava" % "18.0",
   "org.scalanlp" %% "breeze" % "0.13.2"
 )
+
+test in assembly := {}
+assemblyJarName in assembly := "rdf_similarity_search.jar"

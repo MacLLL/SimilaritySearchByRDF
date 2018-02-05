@@ -108,11 +108,11 @@ class TestSingleRDFSuite extends FunSuite with BeforeAndAfterAll {
     }
   }
   test("test number of objects in sub-indexes distribution") {
-    SingleFeatureRDFInit.newMultiThreadFit("glove.twitter.27B/glove.twitter.27B.100d.20k.SparseVector.txt",
+    SingleFeatureRDFInit.newMultiThreadFit("glove.twitter.27B/glove120k100dReverse.txt",
       TestSettings.testBaseConf)
     //see the dataTable distribution, since it's default hash salt, each sub-index has the same percentage
     //but the hashTable distribution are different
-    val (dtDistribution, htDistribution) = SingleFeatureRDFInit.getDtAndHtDifSubIndexObjectsNumDistribution()
+    val (dtDistribution, htDistribution) = SingleFeatureRDFInit.getDtAndHtNumDistribution()
     print("dataTable distribution: ")
     dtDistribution.foreach(x => print(x*100 + "% "))
     println("\nhashTable distribution: ")

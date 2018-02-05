@@ -28,7 +28,7 @@ public class RandomDrawTreeMap<K, V>
         implements ConcurrentMap<K, V>,
         Closeable {
 
-    protected static final Logger LOG = Logger.getLogger(HTreeMap.class.getName());
+    protected static final Logger LOG = Logger.getLogger(RandomDrawTreeMap.class.getName());
 
     /**
      * Lu's comment
@@ -1284,19 +1284,20 @@ public class RandomDrawTreeMap<K, V>
     }
 
     /**
-     * initialize the Store layer, for off-heap storage
+     * initialize the Store layer, for off-heap storage or  in persistent disk
      *
      * @param partitionId
      * @param lockScale
      * @return
      */
     private StoreSegment initPartitionInner(int partitionId, int lockScale) {
-        StoreSegment storeSegment = new StoreSegment(
+        Store storeSegment;
+        storeSegment = new StoreSegment(
                 "partition-" + partitionId, Volume.UNSAFE_VOL_FACTORY, null, lockScale, 0, false, false,
                 null, false, true, null);
-        storeSegment.serializer = LN_SERIALIZER;//Linked-List serializer
+        ((StoreSegment)storeSegment).serializer = LN_SERIALIZER;//Linked-List serializer
         storeSegment.init();
-        return storeSegment;
+        return (StoreSegment) storeSegment;
     }
 
     /**
@@ -1334,9 +1335,9 @@ public class RandomDrawTreeMap<K, V>
         counterRecids.put(partitionId, counterRecIdArray);
     }
 
-    protected String buildStorageName(int partitionId, int segId) {
+    protected String buildStorageName(int partitionId) {
         StringBuilder sb = new StringBuilder();
-        sb.append("partition-" + partitionId + "-" + segId);
+        sb.append("partition-" + partitionId);
         return sb.toString();
     }
 
@@ -1420,15 +1421,6 @@ public class RandomDrawTreeMap<K, V>
         }
     }
 
-
-    /**
-     * get each size of sub-index
-     */
-    public void getPartitionNums() {
-        for (int i = 0; i < numberOfObjectsInEachPartition.length; i++) {
-            System.out.println("Partition " + i + " has " + numberOfObjectsInEachPartition[i] + " objects.");
-        }
-    }
 
     @Override
     public V put(final K key, final V value) {
