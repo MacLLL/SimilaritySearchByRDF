@@ -5,6 +5,7 @@ import java.util
 import scala.collection.mutable
 
 private[mclab] object SimilarityCalculator {
+
   def fastCalculateSimilarity(vector1: SparseVector, vector2: SparseVector): Double = {
 //    println(vector1.toString + vector2.toString)
     require(vector1 != null  && vector2 != null,
@@ -24,4 +25,28 @@ private[mclab] object SimilarityCalculator {
     }
     similarity
   }
+
+  def fastCalculateSimilarity(vector1: DenseVector, vector2: DenseVector): Double = {
+    require(vector1 != null  && vector2 != null,
+      s"${if (vector1 == null) "vector 1" else "vector 2"} is null")
+    require(vector1.size == vector2.size, s"vector1 size: ${vector1.size}, " +
+      s"vector2 size: ${vector2.size}")
+    var similarity = 0.0
+    val pair=vector1.values.zip(vector2.values)
+    pair.foreach(x => similarity = similarity + x._1*x._2)
+    similarity
+  }
+
+  def fastCalculateSimilarity(vector1: SparseVector, vector2: DenseVector): Double = {
+    require(vector1 != null  && vector2 != null,
+      s"${if (vector1 == null) "vector 1" else "vector 2"} is null")
+    require(vector1.size == vector2.size, s"vector1 size: ${vector1.size}, " +
+      s"vector2 size: ${vector2.size}")
+    var similarity = 0.0
+    val pair=vector1.values.zip(vector2.values)
+    pair.foreach(x => similarity = similarity + x._1*x._2)
+    similarity
+  }
+
+
 }

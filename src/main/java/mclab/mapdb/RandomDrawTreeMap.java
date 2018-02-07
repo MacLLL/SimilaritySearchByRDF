@@ -4,11 +4,13 @@ package mclab.mapdb;
 import breeze.stats.distributions.Rand;
 import com.google.common.hash.BloomFilter;
 import com.google.common.hash.Funnels;
+import mclab.deploy.DenseTestInit;
 import mclab.deploy.LSHServer;
 import mclab.deploy.SingleFeatureRDFInit;
 import mclab.lsh.DefaultHasher;
 import mclab.lsh.Hasher;
 import mclab.lsh.LocalitySensitiveHasher;
+import mclab.lsh.vector.DenseVector;
 import mclab.lsh.vector.SparseVector;
 import mclab.utils.Serializers;
 import scala.Array;
@@ -301,7 +303,8 @@ public class RandomDrawTreeMap<K, V>
                 return;
             }
             //TODO: Bug here, we don't check the all dir node
-            out2.packLong((((long) c[BITMAP_SIZE]) << 1) | 1L); //save the k-node
+//            out2.packLong((((long) c[BITMAP_SIZE]) << 1) | 1L);
+            out2.packInt((((int) c[BITMAP_SIZE]) << 1) | 1); //save the k-node
             for (int i = BITMAP_SIZE + 1; i < c.length; i++) {
                 out2.packLong(c[i]);
             }
@@ -480,7 +483,7 @@ public class RandomDrawTreeMap<K, V>
     private long sizeLong(int partitionId) {
         if (counterRecids != null) {
             long ret = 0;
-            for (int segmentId = 0; segmentId < 16; segmentId++) {
+            for (int segmentId = 0; segmentId < SEG; segmentId++) {
                 Lock lock = partitionRamLock.get(partitionId)[segmentId].readLock();
                 try {
                     lock.lock();
@@ -631,7 +634,112 @@ public class RandomDrawTreeMap<K, V>
             final Object key, final int steps) {
         //TODO: Finish getSimilar with steps partition search
         //get hash value
+        long timeA=System.nanoTime();
         final int h = hash((K) key);
+        long timeB=System.nanoTime();
+        System.out.println("time to get hash of key" + (timeB-timeA)/1000000.0 + "ms");
+        //move to left BUCKET_LENGTH, then get the seg.
+        final int seg = h >>> BUCKET_LENGTH;
+        final int partition = partitioner.getPartition(
+                (K) (hasher instanceof LocalitySensitiveHasher ? h : key));
+        final ArrayList<Integer> allSubIndexs = findStepWiseSubIndexIDs(partition, steps);
+        LinkedList<K> finalLns = new LinkedList<>();
+        for (int i = 0; i < allSubIndexs.size(); i++) {
+            int currentPartition = allSubIndexs.get(i);
+            LinkedList<K> tmpLns;
+            try {
+                final Lock ramLock = partitionRamLock.get(currentPartition)[seg].readLock();
+                try {
+                    ramLock.lock();
+                    tmpLns = getInnerWithSimilarity(key, seg, h, currentPartition);
+                } finally {
+                    ramLock.unlock();
+                }
+                if (tmpLns == null || tmpLns.size() == 0 && persistedStorages.containsKey(currentPartition)) {
+                    final Lock persistLock = partitionPersistLock.get(currentPartition)[seg].readLock();
+                    try {
+                        persistLock.lock();
+                        tmpLns = fetchFromPersistedStorageWithSimilarity(
+                                key,
+                                currentPartition,
+                                partitionRootRec.get(currentPartition)[seg],
+                                h);
+                    } finally {
+                        persistLock.unlock();
+                    }
+                }
+            } catch (NullPointerException npe) {
+                //npe.printStackTrace();
+                tmpLns = null;
+            }
+            if (tmpLns != null)
+                finalLns.addAll(tmpLns);
+        }
+        if (finalLns == null)
+            return null;
+        return finalLns;
+    }
+
+    //for sparsevector
+    public LinkedList<K> getSimilarWithStepWiseFaster(
+            final Object key, final SparseVector vector, final int steps) {
+        //TODO: Finish getSimilar with steps partition search
+        //get hash value
+//        long timeA=System.nanoTime();
+        final int h =  hasher.hash(vector, Serializers.VectorSerializer());
+//        long timeB=System.nanoTime();
+//        System.out.println("time to get hash of key" + (timeB-timeA)/1000000.0 + "ms");
+        //move to left BUCKET_LENGTH, then get the seg.
+        final int seg = h >>> BUCKET_LENGTH;
+        final int partition = partitioner.getPartition(
+                (K) (hasher instanceof LocalitySensitiveHasher ? h : key));
+        final ArrayList<Integer> allSubIndexs = findStepWiseSubIndexIDs(partition, steps);
+        LinkedList<K> finalLns = new LinkedList<>();
+        for (int i = 0; i < allSubIndexs.size(); i++) {
+            int currentPartition = allSubIndexs.get(i);
+            LinkedList<K> tmpLns;
+            try {
+                final Lock ramLock = partitionRamLock.get(currentPartition)[seg].readLock();
+                try {
+                    ramLock.lock();
+                    tmpLns = getInnerWithSimilarity(key, seg, h, currentPartition);
+                } finally {
+                    ramLock.unlock();
+                }
+                if (tmpLns == null || tmpLns.size() == 0 && persistedStorages.containsKey(currentPartition)) {
+                    final Lock persistLock = partitionPersistLock.get(currentPartition)[seg].readLock();
+                    try {
+                        persistLock.lock();
+                        tmpLns = fetchFromPersistedStorageWithSimilarity(
+                                key,
+                                currentPartition,
+                                partitionRootRec.get(currentPartition)[seg],
+                                h);
+                    } finally {
+                        persistLock.unlock();
+                    }
+                }
+            } catch (NullPointerException npe) {
+                //npe.printStackTrace();
+                tmpLns = null;
+            }
+            if (tmpLns != null)
+                finalLns.addAll(tmpLns);
+        }
+        if (finalLns == null)
+            return null;
+        return finalLns;
+    }
+
+    //for dense
+    public LinkedList<K> getSimilarWithStepWiseFaster(
+            final Object key, final DenseVector vector, final int steps) {
+        //TODO: Finish getSimilar with steps partition search
+        //get hash value
+//        long timeA=System.nanoTime();
+        final int h =  hasher.hash(vector, Serializers.densevectorSerializer());
+//        long timeB=System.nanoTime();
+//        System.out.println("time to get hash of key" + (timeB-timeA)/1000000.0 + "ms");
         //move to left BUCKET_LENGTH, then get the seg.
         final int seg = h >>> BUCKET_LENGTH;
         final int partition = partitioner.getPartition(
@@ -1309,7 +1417,8 @@ public class RandomDrawTreeMap<K, V>
         // to simulate the default mapdb setup
         // all partition shares the same store with the lockscale of 16,
         // since we only have 16 segments which is default setup in concurrentHashMap
-        StoreSegment store = initPartitionInner(partitionId, 16);
+//        System.out.println(SEG);
+        StoreSegment store = initPartitionInner(partitionId, SEG);
         Long[] segIds = new Long[SEG];
         for (int i = 0; i < SEG; i++) {
             long partitionRoot = store.put(new int[BITMAP_SIZE], DIR_SERIALIZER);
@@ -1376,12 +1485,21 @@ public class RandomDrawTreeMap<K, V>
         if (hasher instanceof LocalitySensitiveHasher) {
             // the hasher is the locality sensitive hasher, where we need to calculate the hash of the
             // vector instead of the key value
-            SparseVector v = SingleFeatureRDFInit.vectorIdToVector().get(key);
+            Object v=null;
+            if(LSHServer.isUseDense()){
+                v= DenseTestInit.vectorIdToVector().get(key);
+            } else{
+                v = SingleFeatureRDFInit.vectorIdToVector().get(key);
+            }
             if (v == null) {
                 System.out.println("fetch vector " + key + ", but got NULL");
                 System.exit(1);
             }
-            return hasher.hash(v, Serializers.VectorSerializer());
+            if(LSHServer.isUseDense()){
+                return hasher.hash((DenseVector)v, Serializers.densevectorSerializer());
+            }else{
+                return hasher.hash((SparseVector)v,Serializers.vectorSerializer());
+            }
         } else {
             // the hasher is the default hasher which calculates the hash based on the key directly
             return hasher.hash(key, keySerializer);

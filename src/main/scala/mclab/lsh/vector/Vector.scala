@@ -208,6 +208,18 @@ object Vectors {
   }
 
   /**
+    * Parse the String like [1,[0.1,0.2,0.4,0.9]] from python
+    * @param inputString
+    * @return denseVector ,like (vectorID, values)
+    */
+  private[mclab] def parseDense(inputString:String):(Int,Array[Double])={
+    val newInputString=inputString.replace(" ","").replace("[","").replace("]","")
+    val arraysOfData=newInputString.split(",")
+    (arraysOfData(0).toInt,arraysOfData.slice(1,arraysOfData.length).map(_.toDouble))
+  }
+
+
+  /**
     * Parse the String like: 1 1_1_Y E into (Int, String)
     * used when read the wholeNewGT.rst
     * @param inputString String

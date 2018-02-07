@@ -23,4 +23,14 @@ class SimilarityCalculatorSuite extends FunSuite {
     val sim1 = SimilarityCalculator.fastCalculateSimilarity(vector3, vector4)
     assert(sim1 === 3.6)
   }
+  test("dense vector similarity calculation"){
+    val vector0=Vectors.sparse(3,Seq((0, 1.1), (1, 1.2), (2, 1.3))).asInstanceOf[SparseVector]
+    val vector1=Vectors.dense(Array(0.1,0.2,0.3)).asInstanceOf[DenseVector]
+    val vector2=Vectors.dense(Array(0.2,0.3,0.4)).asInstanceOf[DenseVector]
+    val sim=SimilarityCalculator.fastCalculateSimilarity(vector1,vector2)
+    assert(sim === 0.2)
+    val sim1=SimilarityCalculator.fastCalculateSimilarity(vector0,vector1)
+    assert(sim1 === 0.74)
+  }
+
 }

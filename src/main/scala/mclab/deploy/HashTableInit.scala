@@ -35,67 +35,6 @@ private[mclab] object HashTableInit {
       confInstance.getInt(s"cpslab.$tableName.chainLength"))
   }
 
-//  def initializeActorBasedHashTree(conf: Config): Unit = {
-//    val tableNum = conf.getInt("cpslab.lsh.tableNum")
-//    setTableNum(tableNum)
-//    val numPartitions = conf.getInt("cpslab.mainTable.numPartitions")
-//    val workingDirRoot = conf.getString("cpslab.lsh.workingDirRoot")
-//    val ramThreshold = conf.getInt("cpslab.lsh.ramThreshold")
-//    val partitionBits = conf.getInt("cpslab.lsh.partitionBits")
-//    val permutationNum=conf.getInt("cpslab.lsh.permutationNum")
-//    setPermutationNum(permutationNum)
-//    val confForPartitioner = ConfigFactory.parseString(
-//      s"""
-//         |cpslab.lsh.vectorDim=32
-//         |cpslab.lshTable.chainLength=$partitionBits
-//      """.stripMargin).withFallback(conf)
-//    def initializeVectorDatabase(tableId: Int): RandomDrawTreeMap[Int, Boolean] = {
-//      new ActorBasedPartitionedHTreeMap[Int, Boolean](
-//        conf,
-//        tableId,
-//        "lsh",
-//        workingDirRoot + "-" + tableId,
-//        "partitionedTree-" + tableId,
-////        new HashPartitioner[Int](numPartitions),
-//        new LocalitySensitivePartitioner[Int](confForPartitioner, tableId, partitionBits),
-//        true,
-//        1,
-//        Serializers.scalaIntSerializer,
-//        null,
-//        null,
-//        Executors.newCachedThreadPool(),
-//        true,
-//        ramThreshold)
-//    }
-//    def initializeIdToVectorMap(conf: Config): PartitionedHTreeMap[Int, SparseVector] = {
-//      new ActorBasedPartitionedHTreeMap[Int, SparseVector](
-//        conf,
-//        tableNum,
-//        "default",
-//        workingDirRoot + "-vector",
-//        "vectorIdToVector",
-//        new HashPartitioner[Int](numPartitions),
-//        true,
-//        1,
-//        Serializers.scalaIntSerializer,
-//        Serializers.vectorSerializer,
-//        null,
-//        Executors.newCachedThreadPool(),
-//        true,
-//        ramThreshold)
-//    }
-//    ActorBasedPartitionedHTreeMap.actorSystem = ActorSystem("AK", conf)
-//    vectorDatabase = new Array[PartitionedHTreeMap[Int, Boolean]](tableNum)
-//    for (tableId <- 0 until tableNum) {
-//      vectorDatabase(tableId) = initializeVectorDatabase(tableId)
-//      setupTable("lshTable", conf, vectorDatabase(tableId))
-//      vectorDatabase(tableId).initStructureLocks()
-//    }
-//    vectorIdToVector = initializeIdToVectorMap(conf)
-//    setupTable("mainTable", conf, vectorIdToVector)
-//    vectorIdToVector.initStructureLocks()
-//  }
-
   def initializeMapDBHashMap(conf: Config): Unit = {
     this.createFlag=true
     val tableNum = conf.getInt("cpslab.lsh.tableNum")
@@ -314,9 +253,6 @@ private[mclab] object HashTableInit {
   }
 
 
-
-
-
   var vectorDatabase_blue:Array[RandomDrawTreeMap[Int,Boolean]] =null
   var vectorDatabase_green:Array[RandomDrawTreeMap[Int,Boolean]] =null
   var vectorDatabase_red:Array[RandomDrawTreeMap[Int,Boolean]] =null
@@ -331,7 +267,7 @@ private[mclab] object HashTableInit {
   def getLSHTableNum(conf:Config):Int=conf.getInt("cpslab.lsh.tableNum")
   def getLSHTableEachPartitionNum():Unit={
     for(i<- 0 until this.vectorDatabase.length){
-      this.vectorDatabase(i).getPartitionNums()
+      this.vectorDatabase(i).partitioner.numPartitions
     }
 
   }
@@ -427,29 +363,6 @@ private[mclab] object HashTableInit {
       HashTableInit.vectorDatabase(i).put(HashTableInit.vectorDatabase(i).size(),true)
     }
   }
-//  /**
-//    * fit the vector into the Indexing structure
-//    * @param filename
-//    * @param conf
-//    */
-//  def fit(filename:String,conf:Config):Unit={
-//    if(LSHServer.lshEngine == null){ LSHServer.lshEngine = new LSH(conf)}
-//    val (vectorArray,numbers) =getSparseVectorsFromFile(filename)
-//    HashTableInit.initializeActorBasedHashTree(conf)
-//    //generate dataTable
-//    for ( i <- 0 until numbers){
-//      HashTableInit.vectorIdToVector.put(i,vectorArray(i))
-//    }
-////    vectorArray.map( x => HashTableInit.vectorIdToVector.put(x.vectorId,x))
-//    //get the LSHTable number
-////    val tableNum = conf.getInt("cpslab.lsh.tableNum")
-//    //put the data into hashTables
-//    for ( i <- 0 until this.tableNum){
-//      for ( j <- vectorArray.indices){
-//        HashTableInit.vectorDatabase(i).put(j,true)
-//      }
-//    }
-//  }
   /**
     * Get the sparse vector from datafile,
     * @param fileName: the filename
@@ -546,71 +459,6 @@ private[mclab] object HashTableInit {
     println("finish green load, totally " + count + " objects.")
     println("finish load all features")
   }
-
-  /**
-    * new Multiple threads fit, to create the indexing faster.
-    * @param fileName
-    * @param conf
-    * @param threadNum
-    * @return
-    */
-  def newMultiThreadFit(fileName:String,conf:Config,threadNum:Int=5):Array[Array[Double]]={
-    if(LSHServer.lshEngine==null) LSHServer.lshEngine=new LSH(conf)
-    HashTableInit.initializeMapDBHashMap(conf)
-    val threadPool:ExecutorService=Executors.newFixedThreadPool(threadNum)
-    val AllSparseVectorsFile = getClass.getClassLoader.getResource(fileName).getFile
-    val allDenseVectors = new ListBuffer[Array[Double]]
-    var count=0
-    var terminateFlag=false
-    val a = System.currentTimeMillis()
-    for (line <- Source.fromFile(AllSparseVectorsFile).getLines()){
-      val tmp=Vectors.fromPythonString(line)
-      val currentSparseVector=new SparseVector(tmp._1,tmp._2,tmp._3,tmp._4)
-      allDenseVectors += tmp._4
-      this.vectorIdToVector.put(count,currentSparseVector)
-      try{
-        for(i <- 0 until threadNum){
-          threadPool.execute(new threadFit(count,currentSparseVector,i*this.tableNum*this.permutationNum/threadNum,(i + 1)*this.tableNum*this.permutationNum/threadNum))
-        }
-      }
-      count += 1
-      if (count % 10000 == 0){ println(count + " objects loaded")}
-    }
-    val b = System.currentTimeMillis()
-    if(!threadPool.isShutdown) {
-      threadPool.shutdown()
-      terminateFlag=true
-    }
-
-    print("time is " + (b-a))
-    allDenseVectors.toArray
-  }
-  private class threadFit(count:Int,vector:SparseVector,start:Int,end:Int) extends Runnable {
-    override def run(): Unit = {
-      for(tableID <- start until end){
-        HashTableInit.vectorDatabase(tableID).put(count,true)
-      }
-    }
-  }
-
-  class ThreadDemo(arr:Array[Int],start:Int,end:Int) extends Runnable{
-    override def run(): Unit = {
-      var result=0
-      for(i <- start until end){
-        result += arr(i)
-      }
-      println(result)
-    }
-  }
-
-  /**
-    * 对每次要put的值，我put两个值，但是这两个值的原有的hashvalue改变了
-    */
-  def newSamplingPut():Unit={
-
-  }
-
-
 }
 
 

@@ -1,10 +1,10 @@
 package mclab.lsh.hashFamilies
 
 import java.nio.ByteBuffer
-import mclab.storage.ByteArrayWrapper
 
+import mclab.storage.ByteArrayWrapper
 import breeze.stats.distributions.Gaussian
-import mclab.lsh.vector.{SimilarityCalculator, SparseVector, Vectors}
+import mclab.lsh.vector.{DenseVector, SimilarityCalculator, SparseVector, Vectors}
 
 import scala.collection.mutable.ListBuffer
 import scala.io.Source
@@ -118,6 +118,29 @@ private[lsh] class PStableHashChain(chainSize: Int, chainedFunctions: List[PStab
   extends LSHTableHashChain[PStableParameterSet](chainSize, chainedFunctions) {
 
   require(chainSize == chainedFunctions.size, s"$chainSize, ${chainedFunctions.size}")
+
+  override  def compute(vector:DenseVector):Int= {
+    val indexInATable = chainedFunctions.foldLeft(Array.fill(0)(0))((existingByteArray, ps2) => {
+      val newByteArray = {
+        // calculate new Byte Array
+        // assuming normalized vector
+        val sum = SimilarityCalculator.fastCalculateSimilarity(ps2.a, vector)
+        //        println("sum=" + sum)
+        //        println(Array(((sum + ps2.b) / ps2.w).toInt)(0))
+        Array(((sum + ps2.b) / ps2.w).toInt)
+
+      }
+      existingByteArray ++ newByteArray
+    })
+    //    for(index <- indexInATable) println(index)
+    // generate byte array typed index
+
+    //indexInATable.map(idx => ByteBuffer.allocate(4).putInt(idx).array()
+    //means convert idx to bytes by using a ByteBuffer
+    ByteArrayWrapper(indexInATable.map(idx => ByteBuffer.allocate(4).putInt(idx).array()).
+      foldLeft(Array.fill(0)(0.toByte))((existingByteArray, newByteArray) =>
+        existingByteArray ++ newByteArray)).hashCode()
+  }
 
   /**
    * calculate the index of the vector in the hash table corresponding to the set of functions

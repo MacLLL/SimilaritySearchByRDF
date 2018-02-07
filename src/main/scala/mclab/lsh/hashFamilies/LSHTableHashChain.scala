@@ -1,6 +1,6 @@
 package mclab.lsh.hashFamilies
 
-import mclab.lsh.vector.SparseVector
+import mclab.lsh.vector.{DenseVector, SparseVector}
 
 
 /**
@@ -20,5 +20,7 @@ private[lsh] abstract class LSHTableHashChain[+T <: LSHFunctionParameterSet](
    * @return the index of the vector
    */
   def compute(vector: SparseVector): Int
+
+  def compute(vector: DenseVector) :Int
   
 }

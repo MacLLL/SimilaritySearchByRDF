@@ -20,14 +20,17 @@ class PartitionDistributionSuite extends FunSuite with BeforeAndAfterAll {
     LSHServer.lshEngine = new LSH(TestSettings.testBaseConf)
   }
 
-  val partitionBits = 4
+  val partitionBits = 3
   val confForPartitioner = ConfigFactory.parseString(
     s"""
+       |mclab.confType=partition
        |mclab.lsh.vectorDim=32
-       |mclab.lsh.chainLength=$partitionBits
+       |mclab.lsh.tableNum = 1
+       |mclab.lshTable.chainLength=$partitionBits
+       |mclab.lsh.generateMethod=default
       """.stripMargin).withFallback(TestSettings.testBaseConf)
 
-  val partition = new LocalitySensitivePartitioner[Int](confForPartitioner, 1, partitionBits)
+
 
   /**
     * Load the feature data file and ground truth file
@@ -66,13 +69,13 @@ class PartitionDistributionSuite extends FunSuite with BeforeAndAfterAll {
     * @param k
     * @return
     */
-  def stepwiseDistribution(allSparseVector: ListBuffer[SparseVector],
+  def stepwiseDistribution(partition:LocalitySensitivePartitioner[Int],allSparseVector: ListBuffer[SparseVector],
                            resultsArray: ListBuffer[Array[Int]], hashFamilyID: Int = 1, k: Int = 10): (Double, Double, Double) = {
     //highest, step one, step two. step 3
     val finalStepsResult: Array[Double] = new Array(partitionBits + 1)
     for (eachGT <- resultsArray) {
       val stepsResults: Array[Double] = new Array(partitionBits + 1)
-      val distribution: Array[Int] = new Array(pow(2, 4).toInt)
+      val distribution: Array[Int] = new Array(pow(2, partitionBits).toInt)
       for (oneObject <- eachGT.slice(0, k)) {
         val sub_indexID = partition.getPartition(LSHServer.lshEngine.calculateIndex(allSparseVector(oneObject),
           hashFamilyID)(0))
@@ -99,7 +102,29 @@ class PartitionDistributionSuite extends FunSuite with BeforeAndAfterAll {
     (finalStepsResult(0), finalStepsResult(1), finalStepsResult(2))
   }
 
+
+//  def pickTheBestPerformanceHashForPartition(): Unit ={
+//
+//    val topKArray=Array(10)
+//    val runRatio=3
+//    val testIterNum=10
+//    val (allSparseVector, resultsArray) = loadVectorFile("glove.twitter.27B/glove.twitter.27B.100d.20k.SparseVector.txt",
+//      "glove.twitter.27B/glove.twitter.27B.100d.20k.groundtruth", 10)
+//    var highest=0.0
+//    var secHighest=0.0
+//    for(hashId <- 0 until TestSettings.testBaseConf.getInt("mclab.lsh.tableNum")){
+//      val highestPercent=new Array[Double](10)
+//      val secHighestPercent=new Array[Double](10)
+//      val curPartitioner=new LocalitySensitivePartitioner[Int](confForPartitioner,0,partitionBits)
+//      (highestPercent(hashId), secHighestPercent(hashId), _) = stepwiseDistribution(curPartitioner,allSparseVector, resultsArray, hashId, 10)
+//    }
+//    highest=highestPercent.zipWithIndex.max._1
+//
+//  }
+
   test("TOP k partition distribution-------->dataset:Glove") {
+    //Todo: change different partitioner
+    val partition = new LocalitySensitivePartitioner[Int](confForPartitioner, 0, partitionBits)
 //    val topKArray = Array(10,30,50,70,90)
     val topKArray = Array(10)
     val tuneRatio = 3
@@ -114,17 +139,18 @@ class PartitionDistributionSuite extends FunSuite with BeforeAndAfterAll {
         var highestPercent = 0.0
         var secondHighestPercent = 0.0
         for (hashId <- 0 until TestSettings.testBaseConf.getInt("mclab.lsh.tableNum")) {
-          val (tmp1, tmp2, tmp3) = stepwiseDistribution(allSparseVector, resultsArray, hashId, k)
+          val (tmp1, tmp2, tmp3) = stepwiseDistribution(partition,allSparseVector, resultsArray, hashId, k)
           if (tmp1 >= highestPercent && tmp1 - highestPercent > secondHighestPercent - tmp2 - tuneRatio / 100.0 * k) {
             highestPercent = tmp1
             secondHighestPercent = tmp2
             highestHashFamilyID = hashId
           }
         }
-        LSHServer.lshEngine.outPutTheHashFunctionsIntoFile(highestHashFamilyID)
+//        LSHServer.lshEngine.outPutTheHashFunctionsIntoFile(highestHashFamilyID)
+        partition.getLSH().outPutTheHashFunctionsIntoFile()
         flag = true
       } else {
-        stepwiseDistribution(allSparseVector, resultsArray, highestHashFamilyID, k)
+        stepwiseDistribution(partition,allSparseVector, resultsArray, highestHashFamilyID, k)
       }
     }
   }

@@ -17,6 +17,7 @@ class LSHSuite extends FunSuite with BeforeAndAfterAll {
          |mclab.lsh.tableNum = 10
          |mclab.lsh.vectorDim = 3
          |mclab.lshTable.chainLength = 2
+         |mclab.lsh.generateMethod=default
       """.stripMargin).withFallback(TestSettings.testBaseConf)
   }
 
@@ -30,10 +31,10 @@ class LSHSuite extends FunSuite with BeforeAndAfterAll {
     println("lsh1 index hash values:")
     keyArray1.map(x=>println(x.toBinaryString))
 
-    val lsh2=new LSH(config,2)
-    val keyArray2 =lsh2.calculateIndex(testVector)
-    println("lsh2 index hash values")
-    keyArray2.map(x=>println(x.toBinaryString))
+//    val lsh2=new LSH(config,2)
+//    val keyArray2 =lsh2.calculateIndex(testVector)
+//    println("lsh2 index hash values")
+//    keyArray2.map(x=>println(x.toBinaryString))
 
 
 
@@ -52,7 +53,7 @@ class LSHSuite extends FunSuite with BeforeAndAfterAll {
       println("---")
     }
 
-    lsh1.outPutTheHashFunctionsIntoFile()
+//    lsh1.outPutTheHashFunctionsIntoFile()
 
 
   }

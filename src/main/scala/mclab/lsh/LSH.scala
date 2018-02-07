@@ -6,7 +6,7 @@ import java.nio.file.{Files, Paths}
 
 import hashFamilies._
 import hashFamilies.Sampling
-import mclab.lsh.vector.SparseVector
+import mclab.lsh.vector.{DenseVector, SparseVector}
 import com.typesafe.config.{Config, ConfigFactory}
 
 /**
@@ -14,10 +14,11 @@ import com.typesafe.config.{Config, ConfigFactory}
  * This class wraps one or more LSHTableHashChains
  * By passing different lshFamilyName, we can implement different lsh schema
  */
-private[mclab] class LSH(conf: Config,seedNumber:Int=1) extends Serializable {
+private[mclab] class LSH(conf: Config) extends Serializable {
   //indicate what type of hash functions to use
   private val lshFamilyName: String = conf.getString("mclab.lsh.name")
-  private val sampling=new Sampling(conf.getInt(s"mclab.lsh.seed$seedNumber"))
+//  private val sampling=new Sampling(conf.getInt(s"mclab.lsh.seed$seedNumber"))
+  private val sampling=new Sampling(88387)
   private val typeOfIndex=conf.getString("mclab.lsh.typeOfIndex")
   LSH.generateByPulling = conf.getBoolean("mclab.lsh.generateByPulling")
   LSH.IsOrthogonal = conf.getBoolean("mclab.lsh.IsOrthogonal")
@@ -63,12 +64,17 @@ private[mclab] class LSH(conf: Config,seedNumber:Int=1) extends Serializable {
     require(lshFamily.isDefined, s"${lshFamilyName} is not a valid family name")
     val tableNum = conf.getInt("mclab.lsh.tableNum")
     val generateMethodOfHashFamily = conf.getString("mclab.lsh.generateMethod")
+    val confType=conf.getString("mclab.confType")
     lshFamily.map(lshHashFamily => {
       if (generateMethodOfHashFamily == "default") {
         lshHashFamily.pick(tableNum)
-      } else if (generateMethodOfHashFamily == "fromfile"){
+      } else if (generateMethodOfHashFamily == "fromfile" && confType == "lsh"){
+        println("reading the lsh functions from file...........")
         lshHashFamily.generateTableChainFromFile(conf.getString("mclab.lsh.familyFilePath"),
-          tableNum) 
+          tableNum)
+      } else if (generateMethodOfHashFamily == "fromfile" && confType == "partition"){
+        println("reading the lsh partitioner functions from file...........")
+        lshHashFamily.generateTableChainFromFile(conf.getString("mclab.lsh.partitionFamilyFilePath"),tableNum)
       } else {
         null
       }
@@ -118,13 +124,55 @@ private[mclab] class LSH(conf: Config,seedNumber:Int=1) extends Serializable {
   }
 
   /**
+    * calculate the index of the vector in tables, the index in each table is represented as a
+    * byte array
+    *
+    * @param vector the vector to be indexed
+    * @param tableId the id of the table
+    * @return the index of the vector in tables, the order corresponds to the validTableIDs parameter
+    */
+  //The difference between doing the LSH and doing the LSH-based partition
+  def calculateIndex(vector: DenseVector, tableId: Int): Array[Int] = {
+    if (tableId < 0) {
+      (for (i <- tableIndexGenerators.indices)
+        yield tableIndexGenerators(i).compute(vector)).toArray
+    } else {
+      //      try{
+      //        if(Array.fill(1)(tableIndexGenerators(tableId).compute(vector))==null){
+      //          println("it's null")
+      //        }
+      //        Array.fill(1)(tableIndexGenerators(tableId).compute(vector))
+      //      }catch{
+      //        case e:NullPointerException =>{
+      //          println("yes")
+      //        }
+      //      }
+      //TODO:sample the hashvalue, it's the more efficient way to do permutation.
+      //ToDo: just remember to keep the random seed consistent when query the index
+      val oneValue= typeOfIndex match {
+        case "original" =>
+          tableIndexGenerators(tableId).compute(vector)
+        case "sampling" =>
+          sampling.samplingOneKey(tableIndexGenerators(tableId).compute(vector))
+        case "continueBitsCount" =>
+          significantBits.continueBitsCount(tableIndexGenerators(tableId).compute(vector),Array(6,4,2,1))
+        case "angleNewMethod" =>
+          significantBits.newMethod(tableIndexGenerators(tableId).compute(vector))
+
+      }
+      //todo variable bits for deeper layer
+      Array.fill(1)(oneValue)
+    }
+  }
+
+  /**
     * Output the best hash functions if you find the performance is good.
     *
     * @param hashFunctionsID default as 0, put the all hash familes, otherwise only put the certain set hash functions
     */
   def outPutTheHashFunctionsIntoFile(hashFunctionsID:Int = -1): Unit = {
     if (hashFunctionsID == -1) {
-      val writer = new FileWriter(new File(s"src/test/resources/hashFamily/bestHashFamily-${conf.getString("mclab.lsh.name")}"), true)
+      val writer = new FileWriter(new File(s"src/test/resources/hashFamily/${conf.getString("mclab.confType")}-bestHashFamily-${conf.getString("mclab.lsh.name")}-TableNum-${conf.getInt("mclab.lsh.tableNum")}"))
       lshFamilyName match {
         case "angle" =>
           tableIndexGenerators.map(x => x.chainedHashFunctions.map(x => writer.append(x.toString + "\r\n")))
@@ -134,7 +182,7 @@ private[mclab] class LSH(conf: Config,seedNumber:Int=1) extends Serializable {
       }
       writer.close()
     } else {
-      val writer = new FileWriter(new File(s"src/test/resources/hashFamily/theBestHashFamilyForPartition-${conf.getString("mclab.lsh.name")}"), true)
+      val writer = new FileWriter(new File(s"src/test/resources/hashFamily/${conf.getString("mclab.confType")}-theBestOneHashForPartition-${conf.getString("mclab.lsh.name")}"))
       lshFamilyName match {
         case "angle" =>
           tableIndexGenerators(hashFunctionsID).chainedHashFunctions.foreach(x => writer.write(x.toString + "\r\n"))
@@ -142,6 +190,7 @@ private[mclab] class LSH(conf: Config,seedNumber:Int=1) extends Serializable {
           tableIndexGenerators(hashFunctionsID).chainedHashFunctions.foreach(x => writer.write(x.toString + "\r\n"))
         case x => None
       }
+      writer.close()
     }
   }
 }

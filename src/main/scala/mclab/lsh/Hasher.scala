@@ -1,7 +1,8 @@
 package mclab.lsh
 
-import mclab.lsh.vector.SparseVector
+import mclab.lsh.vector.{DenseVector, SparseVector}
 import mclab.mapdb.Serializer
+import mclab.deploy.LSHServer
 
 /**
   * A trait define the abstract method hash
@@ -43,7 +44,12 @@ class DefaultHasher(hashSalt: Int) extends Hasher {
 class LocalitySensitiveHasher(lsh: LSH, tableId: Int) extends Hasher {
   assert(lsh != null)
   override def hash[K](key: K, keySerializer: Serializer[K]): Int = {
-    lsh.calculateIndex(key.asInstanceOf[SparseVector], tableId)(0)
+    if(LSHServer.isUseDense){
+      lsh.calculateIndex(key.asInstanceOf[DenseVector], tableId)(0)
+    }else{
+      lsh.calculateIndex(key.asInstanceOf[SparseVector], tableId)(0)
+    }
+
   }
 }
 

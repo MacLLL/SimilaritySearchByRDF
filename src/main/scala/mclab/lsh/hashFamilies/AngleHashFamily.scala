@@ -1,7 +1,6 @@
 package mclab.lsh.hashFamilies
 
-import breeze.linalg._
-import mclab.lsh.vector.{SimilarityCalculator, SparseVector, Vectors}
+import mclab.lsh.vector.{SimilarityCalculator, SparseVector, DenseVector,Vectors}
 
 import scala.collection.mutable.ListBuffer
 import scala.io.Source
@@ -26,6 +25,8 @@ private[lsh] class AngleHashFamily(
     vectorDim: Int,
     chainLength: Int,
     permutationNum: Int) extends LSHHashFamily[AngleParameterSet] {
+  //for consist test
+  val rd:Random=new Random()
 
   /**
     * Generate a unit vector as SparseVector form, which is normal angle functions
@@ -36,9 +37,9 @@ private[lsh] class AngleHashFamily(
   private def getNewUnitVector: SparseVector = {
     val values = {
       //generate the vectorDim numbers of 0 to 1 Double
-      val arr = (for (vectorDim <- 0 until vectorDim) yield Random.nextDouble()).toArray
+      val arr = (for (vectorDim <- 0 until vectorDim) yield rd.nextDouble()).toArray
       //uniformly make the value from -1 to 1.
-      arr.map(value => if (Random.nextInt(2) > 0) value else -1 * value)
+      arr.map(value => if (rd.nextInt(2) > 0) value else -1 * value)
     }
     //return the indices that value !=0
     val indices = values.zipWithIndex.filter { case (value, index) => value != 0 }.map(_._2)
@@ -72,9 +73,9 @@ private[lsh] class AngleHashFamily(
   private def initOrthogonalUnitVectorHashFamily: Array[AngleParameterSet] = {
     val parameters = new ListBuffer[AngleParameterSet]
     //generate a matrix
-    val originalMatrix = DenseMatrix.rand[Double](familySize, vectorDim)
+    val originalMatrix = breeze.linalg.DenseMatrix.rand[Double](familySize, vectorDim)
     //do QR factorization
-    val orthogonalMatrix = qr.justQ(originalMatrix)
+    val orthogonalMatrix = breeze.linalg.qr.justQ(originalMatrix)
     for (i <- 0 until familySize) {
       val values = (for (j <- 0 until vectorDim) yield orthogonalMatrix.valueAt(i, j)).toArray
       val indices = values.zipWithIndex.filter { case (value, index) => value != 0 }.map(_._2)
@@ -131,7 +132,7 @@ private[lsh] class AngleHashFamily(
     for (tableId <- 0 until tableNum) {
       val hashFunctionChain = (0 until chainLength).map(_ =>
         if (LSH.generateByPulling) {
-          val nextID = Random.nextInt(familySize)
+          val nextID = rd.nextInt(familySize)
           hashFamily(nextID)
         } else {
           //pick the normal angle function one by one, since orthogonal functions have to be generate by bunch
@@ -141,7 +142,7 @@ private[lsh] class AngleHashFamily(
       //TODO: directly on hash values, which don't need to generate new hash functions.
       for (permutationID <- 0 until permutationNum) {
         generatedHashChains(permutationNum * tableId + permutationID) = new
-            AngleHashChain(chainLength, Random.shuffle(hashFunctionChain))
+            AngleHashChain(chainLength, rd.shuffle(hashFunctionChain))
       }
     }
     generatedHashChains.toList
@@ -156,9 +157,10 @@ private[lsh] class AngleHashFamily(
     */
   override def generateTableChainFromFile(filePath: String, tableNum: Int):
   List[LSHTableHashChain[AngleParameterSet]] = {
+    val file=getClass.getClassLoader.getResource(filePath).getFile
     val paraSetList = new ListBuffer[AngleParameterSet]
     try {
-      for (vectorString <- Source.fromFile(filePath).getLines()) {
+      for (vectorString <- Source.fromFile(file).getLines()) {
         val unitVector = Vectors.fromString(vectorString)
         paraSetList += new AngleParameterSet(
           Vectors.sparse(unitVector._1, unitVector._2, unitVector._3, unitVector._4).
@@ -180,6 +182,17 @@ private[lsh] class AngleHashChain(chainSize: Int, chainedFunctions: List[AnglePa
 
   //for the convenience to save the hash value as primitive type
   private def sign(input: Double): Int = if (input <= 0) 0 else 1
+
+
+  override def compute(vector: DenseVector):Int={
+    var result=0
+    for (hashFunctionId <- 0 until chainSize){
+      val signResult= sign(SimilarityCalculator.fastCalculateSimilarity(chainedHashFunctions(hashFunctionId).oneFunction,
+        vector))
+      result = result << 1 | signResult
+    }
+    result << (32 - chainSize)
+  }
 
   /**
     * calculate the index of the vector in the hash table corresponding to the set of functions

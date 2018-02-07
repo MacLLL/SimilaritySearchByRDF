@@ -2,7 +2,7 @@ package mclab.utils
 
 import java.io.{DataInput, DataOutput}
 
-import mclab.lsh.vector.SparseVector
+import mclab.lsh.vector.{DenseVector, SparseVector}
 import mclab.mapdb.{LSHBTreeVal, Serializer}
 
 /**
@@ -80,7 +80,33 @@ object Serializers {
     }
   }
 
+  /**
+    * implement the denseVector serializer :(vectorId,values)
+    */
+  val densevectorSerializer = new Serializer[DenseVector] {
+
+    override def serialize(out: DataOutput, obj: DenseVector): Unit = {
+      out.writeInt(obj.vectorId)
+      out.writeInt(obj.values.length)
+      for (value <- obj.values) {
+        out.writeDouble(value)
+      }
+    }
+
+    override def deserialize(in: DataInput, available: Int): DenseVector = {
+      val vectorId = in.readInt()
+      val realsize = in.readInt()
+      val values = for (i <- 0 until realsize) yield in.readDouble()
+      new DenseVector(vectorId, values.toArray)
+    }
+  }
+
+
   def IntSerializer = scalaIntSerializer
+
   def VectorSerializer = vectorSerializer
+
   def VectorIDHashSerializer = vectorIDHashPairSerializer
+
+  def DenseVectorSerializer = densevectorSerializer
 }

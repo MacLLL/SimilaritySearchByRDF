@@ -5,23 +5,26 @@ import com.typesafe.config.ConfigFactory
 private[mclab] object TestSettings {
   private val appConf = ConfigFactory.parseString(
     s"""
+       |mclab.confType=lsh
        |mclab.lsh.name = angle
        |mclab.lsh.generateByPulling = true
        |mclab.lsh.IsOrthogonal = true
        |mclab.lsh.generateMethod = default
-       |mclab.lsh.familyFilePath = "hashFamily/bestHashFamily-angle"
+       |mclab.lsh.familyFilePath = "hashFamily/lsh-bestHashFamily-angle-TableNum-10"
+       |mclab.lsh.partitionFamilyFilePath="hashFamily/partition-bestHashFamily-angle"
        |mclab.lsh.family.pstable.mu = 0.0
        |mclab.lsh.family.pstable.sigma = 1.0
        |mclab.lsh.family.pstable.w = 4
        |
        |mclab.lsh.familySize = 100
        |mclab.lsh.vectorDim = 100
-       |mclab.lsh.tableNum = 10
+       |mclab.lsh.tableNum = 20
        |mclab.lsh.permutationNum = 1
        |mclab.lsh.seed1 = 31258
        |mclab.lsh.seed2 = 24872
        |mclab.lsh.seed3 = 83752
        |mclab.lsh.typeOfIndex = original
+       |mclab.lsh.featureDataFormat = sparse
        |
        |mclab.lshTable.bufferOverflow=500
        |mclab.dataTable.bufferOverflow=500
@@ -31,14 +34,14 @@ private[mclab] object TestSettings {
        |mclab.dataTable.dirNodeSize=32
        |mclab.lshTable.chainLength = 32
        |mclab.dataTable.chainLength = 32
-       |mclab.dataTable.numPartitions=4
-       |mclab.lsh.partitionBits=2
+       |mclab.dataTable.numPartitions=1
+       |mclab.lsh.partitionBits=1
        |mclab.lsh.partitionBitsGenerateMethod="default"
        |
        |mclab.lsh.ramThreshold=2147483647
        |mclab.lsh.workingDirRoot="PersistIndex"
-       |mclab.insertThreadNum=10
-       |mclab.queryThreadNum=5
+       |mclab.insertThreadNum=20
+       |mclab.queryThreadNum=20
        |mclab.lsh.topK = 10
        |
        |

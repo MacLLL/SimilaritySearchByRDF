@@ -19,7 +19,7 @@ class HashPartitioner[K](numPartitions: Int) extends Partitioner[K](numPartition
 /**
   * Locality sensitive hashing partitioner
   * @param conf application configuration
-  * @param tableId
+  * @param tableId for lsh partitioner, since we only generate one chainedFunctions for each hashTable, the tableId we always set 0
   * @param partitionBits the number of bits which used to define the sub-index-ID, here numPartitions=1 << partitionBits
   * @tparam K
   */
@@ -28,6 +28,10 @@ class LocalitySensitivePartitioner[K](conf: Config, tableId: Int, partitionBits:
 
   //LSH class for partitioner
   val localitySensitiveHashing = new LSH(conf)
+
+  def getLSH():LSH={
+    localitySensitiveHashing
+  }
 
   println("===initialized Locality Sensitive Partitioner =====")
 
