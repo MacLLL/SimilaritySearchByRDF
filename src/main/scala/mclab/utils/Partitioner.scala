@@ -1,8 +1,9 @@
 package mclab.utils
 
 import com.typesafe.config.Config
+import mclab.deploy.LSHServer
 import mclab.lsh.LSH
-import mclab.lsh.vector.SparseVector
+import mclab.lsh.vector.{DenseVector, SparseVector}
 import mclab.mapdb.Partitioner
 
 /**
@@ -28,6 +29,7 @@ class LocalitySensitivePartitioner[K](conf: Config, tableId: Int, partitionBits:
 
   //LSH class for partitioner
   val localitySensitiveHashing = new LSH(conf)
+//  println(conf.getInt("mclab.lsh.vectorDim"))
 
   def getLSH():LSH={
     localitySensitiveHashing
@@ -47,11 +49,17 @@ class LocalitySensitivePartitioner[K](conf: Config, tableId: Int, partitionBits:
     }
     val index = vector.zipWithIndex.filter(_._1 != 0).map(_._2)
     val values = vector.filter(_ != 0).map(_.toDouble)
-    val v = new SparseVector(0, 32, index, values)
+
     //re locality-sensitive hashing:generate the partitions, for example,
     // if it is partitionBits=2, and hash value is 10......,
     //then move 30 bits, it will become 10, which is sub-index-2
     //too solid!
-    localitySensitiveHashing.calculateIndex(v, tableId)(0) >>> (32 - partitionBits)
+//    if(!LSHServer.isUseDense){
+      val v = new SparseVector(0, 32, index, values)
+      localitySensitiveHashing.calculateIndex(v, tableId)(0) >>> (32 - partitionBits)
+//    }else{
+//      val v = new DenseVector(0,values)
+//      localitySensitiveHashing.calculateIndex(v,tableId)(0) >>> (32 - partitionBits)
+//    }
   }
 }

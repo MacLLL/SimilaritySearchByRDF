@@ -4,11 +4,11 @@ import com.typesafe.config.ConfigFactory
 import mclab.TestSettings
 import mclab.deploy.LSHServer
 import mclab.lsh.LSH
-import mclab.lsh.vector.{SparseVector, Vectors}
+import mclab.lsh.vector.{DenseVector, SparseVector, Vectors}
 import mclab.utils.LocalitySensitivePartitioner
 import org.scalatest.{BeforeAndAfterAll, FunSuite}
 
-import scala.collection.mutable.ListBuffer
+import scala.collection.mutable.{ArrayBuffer, ListBuffer}
 import scala.io.Source
 import scala.math._
 
@@ -18,9 +18,10 @@ import scala.math._
 class PartitionDistributionSuite extends FunSuite with BeforeAndAfterAll {
   override def beforeAll(): Unit = {
     LSHServer.lshEngine = new LSH(TestSettings.testBaseConf)
+    LSHServer.isUseDense= true
   }
 
-  val partitionBits = 3
+  val partitionBits = 2
   val confForPartitioner = ConfigFactory.parseString(
     s"""
        |mclab.confType=partition
@@ -40,14 +41,17 @@ class PartitionDistributionSuite extends FunSuite with BeforeAndAfterAll {
     * @param k         top k to be analyzed, default as 10
     * @return the list of feature vectors, and the list of ground truth
     */
-  def loadVectorFile(filename1: String, filename2: String, k: Int = 10): (ListBuffer[SparseVector], ListBuffer[Array[Int]]) = {
+  def loadVectorFile(filename1: String, filename2: String, k: Int = 10): (ListBuffer[DenseVector], ListBuffer[Array[Int]]) = {
     println("Start load the data...")
-    val allSparseVector = new ListBuffer[SparseVector]
+//    val allSparseVector = new ListBuffer[DenseVector]
+    val allDenseVector =new ListBuffer[DenseVector]
     var count = 0
     for (line <- Source.fromFile(getClass.getClassLoader.getResource(filename1).getFile).getLines()) {
-      val tmp = Vectors.fromPythonString(line)
-      val currentSparseVector = new SparseVector(tmp._1, tmp._2, tmp._3, tmp._4)
-      allSparseVector += currentSparseVector
+      val tmp = Vectors.parseDense(line)
+//      val currentSparseVector = new SparseVector(tmp._1, tmp._2, tmp._3, tmp._4)
+      val currentDenseVector = new DenseVector(tmp._1,tmp._2)
+//      allSparseVector += currentSparseVector
+      allDenseVector += currentDenseVector
       count += 1
       if (count % 10000 == 0) {
         println(count)
@@ -58,26 +62,26 @@ class PartitionDistributionSuite extends FunSuite with BeforeAndAfterAll {
       resultsArray += Vectors.analysisKNN(line, k)
     }
     println("Finish load the feature data and ground truth.")
-    (allSparseVector, resultsArray)
+    (allDenseVector, resultsArray)
   }
   /**
     * Calculate the distribution of objects into different sub-indexs
     *
-    * @param allSparseVector
+    * @param allDenseVector
     * @param resultsArray
     * @param hashFamilyID
     * @param k
     * @return
     */
-  def stepwiseDistribution(partition:LocalitySensitivePartitioner[Int],allSparseVector: ListBuffer[SparseVector],
-                           resultsArray: ListBuffer[Array[Int]], hashFamilyID: Int = 1, k: Int = 10): (Double, Double, Double) = {
+  def stepwiseDistribution(partition:LocalitySensitivePartitioner[Int],allDenseVector: ListBuffer[DenseVector],
+                           resultsArray: ListBuffer[Array[Int]], hashFamilyID: Int = 1, k: Int = 10,paritionID:Int): (Double, Double, Double) = {
     //highest, step one, step two. step 3
     val finalStepsResult: Array[Double] = new Array(partitionBits + 1)
     for (eachGT <- resultsArray) {
       val stepsResults: Array[Double] = new Array(partitionBits + 1)
       val distribution: Array[Int] = new Array(pow(2, partitionBits).toInt)
       for (oneObject <- eachGT.slice(0, k)) {
-        val sub_indexID = partition.getPartition(LSHServer.lshEngine.calculateIndex(allSparseVector(oneObject),
+        val sub_indexID = partition.getPartition(LSHServer.lshEngine.calculateIndex(allDenseVector(oneObject),
           hashFamilyID)(0))
         distribution(sub_indexID) += 1
       }
@@ -96,7 +100,7 @@ class PartitionDistributionSuite extends FunSuite with BeforeAndAfterAll {
         finalStepsResult(i) += stepsResults(i) / resultsArray.toArray.length.toDouble
       }
     }
-    println("Finish calculate hash family ID = " + hashFamilyID)
+    println("Finish calculate partition " + paritionID)
     finalStepsResult.foreach(x => print(x / k * 100.0 + "% "))
     println()
     (finalStepsResult(0), finalStepsResult(1), finalStepsResult(2))
@@ -124,34 +128,68 @@ class PartitionDistributionSuite extends FunSuite with BeforeAndAfterAll {
 
   test("TOP k partition distribution-------->dataset:Glove") {
     //Todo: change different partitioner
-    val partition = new LocalitySensitivePartitioner[Int](confForPartitioner, 0, partitionBits)
-//    val topKArray = Array(10,30,50,70,90)
-    val topKArray = Array(10)
+    val partition: ArrayBuffer[LocalitySensitivePartitioner[Int]] = new ArrayBuffer[LocalitySensitivePartitioner[Int]](10)
+    //      new LocalitySensitivePartitioner[Int](confForPartitioner, 0, partitionBits)
+    for (i <- 0 until 50) {
+      partition += new LocalitySensitivePartitioner[Int](confForPartitioner, 0, partitionBits)
+    }
+        val topKArray = Array(10,30,50,70,90)
+//    val topKArray = Array(10)
     val tuneRatio = 3
     var flag = false
-    val (allSparseVector, resultsArray) = loadVectorFile("glove.twitter.27B/glove.twitter.27B.100d.20k.SparseVector.txt",
-      "glove.twitter.27B/glove.twitter.27B.100d.20k.groundtruth", 10)
-    var highestHashFamilyID = 0
+    val (allDenseVector, resultsArray) = loadVectorFile("partition/glove.twitter.27B.100d.DenseVector",
+      "partition/glove.twitter.27B.100d.2000queryGT.top100", 100)
+//    val (allDenseVector, resultsArray) = loadVectorFile("glove.twitter.27B/glove.twitter.27B.100d.20k.DenseVector.txt",
+//      "glove.twitter.27B/glove.twitter.27B.100d.20k.groundtruth", 10)
+    //    var highestHashFamilyID = 0
+    var bestPartition:Int=0
     for (k <- topKArray) {
       println("********************k=" + k + "*************************")
-      //to pick the best hash function wisely
       if (!flag) {
         var highestPercent = 0.0
         var secondHighestPercent = 0.0
-        for (hashId <- 0 until TestSettings.testBaseConf.getInt("mclab.lsh.tableNum")) {
-          val (tmp1, tmp2, tmp3) = stepwiseDistribution(partition,allSparseVector, resultsArray, hashId, k)
+        for (i <- partition.indices) {
+          val (tmp1, tmp2, tmp3) = stepwiseDistribution(partition(i), allDenseVector, resultsArray, 0, k,i)
           if (tmp1 >= highestPercent && tmp1 - highestPercent > secondHighestPercent - tmp2 - tuneRatio / 100.0 * k) {
             highestPercent = tmp1
             secondHighestPercent = tmp2
-            highestHashFamilyID = hashId
+            bestPartition = i
           }
         }
-//        LSHServer.lshEngine.outPutTheHashFunctionsIntoFile(highestHashFamilyID)
-        partition.getLSH().outPutTheHashFunctionsIntoFile()
+        println("The best partition is " + bestPartition)
+        partition(bestPartition).getLSH().outPutTheHashFunctionsIntoFile()
         flag = true
       } else {
-        stepwiseDistribution(partition,allSparseVector, resultsArray, highestHashFamilyID, k)
+        stepwiseDistribution(partition(bestPartition), allDenseVector, resultsArray, 0, k,bestPartition)
       }
     }
   }
+
+//    for (i <- partition.indices){
+//      println("the partition id is " + i)
+//      for (k <- topKArray) {
+//        println("********************k=" + k + "*************************")
+//        //to pick the best hash function wisely
+//        if (!flag) {
+//          var highestPercent = 0.0
+//          var secondHighestPercent = 0.0
+//          for (partitionId <- 0 until partition.size) {
+//            val (tmp1, tmp2, tmp3) = stepwiseDistribution(partition(parti),allDenseVector, resultsArray, 0, k)
+//            if (tmp1 >= highestPercent && tmp1 - highestPercent > secondHighestPercent - tmp2 - tuneRatio / 100.0 * k) {
+//              highestPercent = tmp1
+//              secondHighestPercent = tmp2
+//              bestPartition=partition(i)
+////              highestHashFamilyID = hashId
+//            }
+//          }
+//          //        LSHServer.lshEngine.outPutTheHashFunctionsIntoFile(highestHashFamilyID)
+//          bestPartition.getLSH().outPutTheHashFunctionsIntoFile()
+//          flag = true
+//        } else {
+//          stepwiseDistribution(partition(i),allDenseVector, resultsArray, highestHashFamilyID, k)
+//        }
+//      }
+//    }
+//
+//  }
 }

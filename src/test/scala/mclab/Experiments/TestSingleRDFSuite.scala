@@ -121,36 +121,45 @@ class TestSingleRDFSuite extends FunSuite with BeforeAndAfterAll {
 //    System.gc()
 //  }
 
-//  test("test number of objects in sub-indexes distribution") {
-//    SingleFeatureRDFInit.newMultiThreadFit("glove.twitter.27B/glove120k100dReverse.txt",
-//      TestSettings.testBaseConf)
-//    //see the dataTable distribution, since it's default hash salt, each sub-index has the same percentage
-//    //but the hashTable distribution are different
-//    val (dtDistribution, htDistribution) = SingleFeatureRDFInit.getDtAndHtNumDistribution()
-//    print("dataTable distribution: ")
-//    dtDistribution.foreach(x => print(x*100 + "% "))
-//    println("\nhashTable distribution: ")
-//    htDistribution.foreach(x => print(x*100 + "% "))
-//  }
-
-  test("test one query speed"){
+  test("test number of objects in sub-indexes distribution") {
     LSHServer.lshEngine = new LSH(TestSettings.testBaseConf)
     LSHServer.isUseDense= false
-    val allDenseVectors = SingleFeatureRDFInit.newMultiThreadFit("glove.twitter.27B/glove120k100dReverse.txt",
+    //    DenseTestInit.newMultiThreadFit("glove.twitter.27B/glove.twitter.27B.100d.20k.DenseVector.txt",
+    //      TestSettings.testBaseConf)
+    //    DenseTestInit.newMultiThreadFit("partition/glove.twitter.27B.100d.DenseVector",
+    //            TestSettings.testBaseConf)
+    //    DenseTestInit.newMultiThreadFit("ns/fashion-mnist-784d-DenseVector.txt",
+    //      TestSettings.testBaseConf)
+    SingleFeatureRDFInit.newMultiThreadFit("video256d/Vector256dForCategory_blue_1",
       TestSettings.testBaseConf)
-    val step=0
-    val sv:Array[SparseVector]=new Array(100)
-    for(i <- 0 until 100){sv(i)=Vectors.sparse(i,100,Array.range(0,100),allDenseVectors(i)).asInstanceOf[SparseVector]}
-//    val sv1=Vectors.sparse(0,100,Array.range(0,100),allDenseVectors(0)).asInstanceOf[SparseVector]
-//    val sv2=Vectors.sparse(1,100,Array.range(0,100),allDenseVectors(0)).asInstanceOf[SparseVector]
-//    val sv3=Vectors.sparse(2,100,Array.range(0,100),allDenseVectors(0)).asInstanceOf[SparseVector]
-//    val sv4=Vectors.sparse(3,100,Array.range(0,100),allDenseVectors(0)).asInstanceOf[SparseVector]
-    val timea=System.nanoTime()
-    SingleFeatureRDFInit.query(Array.range(0,100),sv,step)
-//    SingleFeatureRDFInit.queryBatch(Array.range(0,100),sv,step)
-    val timeb=System.nanoTime()
-    println("Step= " + step + ", Single query time " + (timeb-timea)/1000000.0 + "ms")
+    //see the dataTable distribution, since it's default hash salt, each sub-index has the same percentage
+    //but the hashTable distribution are different
+    val (dtDistribution, htDistribution) = SingleFeatureRDFInit.getDtAndHtNumDistribution()
+    print("dataTable distribution: ")
+    dtDistribution.foreach(x => print(x*100 + "% "))
+    println("\nhashTable distribution: ")
+    htDistribution.foreach(x => print(x*100 + "% "))
   }
+
+//  test("test one query speed"){
+//    LSHServer.lshEngine = new LSH(TestSettings.testBaseConf)
+//    LSHServer.isUseDense= false
+//    val allDenseVectors = SingleFeatureRDFInit.newMultiThreadFit("glove.twitter.27B/glove120k100dReverse.txt",
+//      TestSettings.testBaseConf)
+//    val step=0
+//    val sv:Array[SparseVector]=new Array(100)
+//    for(i <- 0 until 100){sv(i)=Vectors.sparse(i,100,Array.range(0,100),allDenseVectors(i)).asInstanceOf[SparseVector]}
+////    val sv1=Vectors.sparse(0,100,Array.range(0,100),allDenseVectors(0)).asInstanceOf[SparseVector]
+////    val sv2=Vectors.sparse(1,100,Array.range(0,100),allDenseVectors(0)).asInstanceOf[SparseVector]
+////    val sv3=Vectors.sparse(2,100,Array.range(0,100),allDenseVectors(0)).asInstanceOf[SparseVector]
+////    val sv4=Vectors.sparse(3,100,Array.range(0,100),allDenseVectors(0)).asInstanceOf[SparseVector]
+//    val timea=System.nanoTime()
+//    SingleFeatureRDFInit.query(Array.range(0,100),sv,step)
+////    SingleFeatureRDFInit.queryBatch(Array.range(0,100),sv,step)
+//    val timeb=System.nanoTime()
+//    println("Step= " + step + ", Single query time " + (timeb-timea)/1000000.0 + "ms")
+//    SingleFeatureRDFInit.vectorDatabase(0).runPersistTask(0)
+//  }
 
 //  test("test one query speed, denseVector"){
 //    LSHServer.lshEngine = new LSH(TestSettings.testBaseConf)

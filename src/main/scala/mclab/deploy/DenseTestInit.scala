@@ -158,21 +158,25 @@ private[mclab] object DenseTestInit {
     * @param conf     configuration
     * @return the Array of all densVectors in dataTable
     */
-  def newMultiThreadFit(fileName: String, conf: Config): Array[Array[Double]] = {
+  def newMultiThreadFit(fileName: String, conf: Config): Array[DenseVector] = {
     if (LSHServer.lshEngine == null) LSHServer.lshEngine = new LSH(conf)
-    val threadNum = conf.getInt("mclab.insertThreadNum")
+    val threadNum = if (conf.getInt("mclab.insertThreadNum") > tableNum){
+      tableNum
+    }else{
+      conf.getInt("mclab.insertThreadNum")
+    }
     this.initializeRDFHashMap(conf)
     println("Finish initialize the RDF.")
     val insertThreadPool: ExecutorService = Executors.newFixedThreadPool(threadNum)
     val AllDenseVectorsFile = getClass.getClassLoader.getResource(fileName).getFile
-    val allDenseVectors = new ListBuffer[Array[Double]]
+    val allDenseVectors = new ListBuffer[DenseVector]
     var vectorId = 0
     var flag = true
     try {
       for (line <- Source.fromFile(AllDenseVectorsFile).getLines()) {
         val tmp = Vectors.parseDense(line)
         val currentDenseVector = new DenseVector(tmp._1,tmp._2)
-        allDenseVectors += tmp._2
+        allDenseVectors += currentDenseVector
         this.vectorIdToVector.put(vectorId, currentDenseVector)
         try {
           for (i <- 0 until threadNum) {
@@ -196,7 +200,7 @@ private[mclab] object DenseTestInit {
       Thread.sleep(5)
     }
     println("finish load, dataTable totally has " + vectorIdToVector.size() + " objects.")
-    allDenseVectors.toArray
+    allDenseVectors
   }
 
   /**

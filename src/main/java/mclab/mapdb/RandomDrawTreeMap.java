@@ -10,8 +10,7 @@ import mclab.deploy.SingleFeatureRDFInit;
 import mclab.lsh.DefaultHasher;
 import mclab.lsh.Hasher;
 import mclab.lsh.LocalitySensitiveHasher;
-import mclab.lsh.vector.DenseVector;
-import mclab.lsh.vector.SparseVector;
+import mclab.lsh.vector.*;
 import mclab.utils.Serializers;
 import scala.Array;
 import scala.collection.mutable.StringBuilder;
@@ -1569,6 +1568,35 @@ public class RandomDrawTreeMap<K, V>
         return value;
     }
 
+    public V put(final K key, SparseVector vector, final V value) {
+
+        if (key == null)
+            throw new IllegalArgumentException("null key");
+
+        if (value == null)
+            throw new IllegalArgumentException("null value");
+
+        V ret;
+        final int h =  hasher.hash(vector, Serializers.VectorSerializer());
+//        final int h = hash(key);
+        final int seg = h >>> BUCKET_LENGTH;
+        final int partition = partitioner.getPartition(
+                (K) (hasher instanceof LocalitySensitiveHasher ? h : key));
+        initPartitionIfNecessary(partition);
+        if (hasher instanceof LocalitySensitiveHasher)
+            numberOfObjectsInEachPartition[partition]++;
+        try {
+            partitionRamLock.get(partition)[seg].writeLock().lock();
+            ret = putInner(key, value, h, partition);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        } finally {
+            partitionRamLock.get(partition)[seg].writeLock().unlock();
+        }
+        return value;
+    }
+
     /***
      * for multi feature
      *
@@ -2497,7 +2525,6 @@ public class RandomDrawTreeMap<K, V>
         } finally {
             partitionRamLock.get(partition)[seg].writeLock().unlock();
         }
-
         return ret;
     }
 

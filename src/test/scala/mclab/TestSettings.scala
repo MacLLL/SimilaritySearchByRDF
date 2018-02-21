@@ -16,9 +16,9 @@ private[mclab] object TestSettings {
        |mclab.lsh.family.pstable.sigma = 1.0
        |mclab.lsh.family.pstable.w = 4
        |
-       |mclab.lsh.familySize = 100
-       |mclab.lsh.vectorDim = 100
-       |mclab.lsh.tableNum = 20
+       |mclab.lsh.familySize = 128
+       |mclab.lsh.vectorDim = 128
+       |mclab.lsh.tableNum = 10
        |mclab.lsh.permutationNum = 1
        |mclab.lsh.seed1 = 31258
        |mclab.lsh.seed2 = 24872
@@ -26,22 +26,22 @@ private[mclab] object TestSettings {
        |mclab.lsh.typeOfIndex = original
        |mclab.lsh.featureDataFormat = sparse
        |
-       |mclab.lshTable.bufferOverflow=500
-       |mclab.dataTable.bufferOverflow=500
+       |mclab.lshTable.bufferOverflow=5000
+       |mclab.dataTable.bufferOverflow=5000
        |mclab.lshTable.bucketBits=28
        |mclab.dataTable.bucketBits=28
        |mclab.lshTable.dirNodeSize=32
        |mclab.dataTable.dirNodeSize=32
-       |mclab.lshTable.chainLength = 32
-       |mclab.dataTable.chainLength = 32
+       |mclab.lshTable.chainLength = 20
+       |mclab.dataTable.chainLength = 20
        |mclab.dataTable.numPartitions=1
-       |mclab.lsh.partitionBits=1
+       |mclab.lsh.partitionBits=0
        |mclab.lsh.partitionBitsGenerateMethod="default"
        |
        |mclab.lsh.ramThreshold=2147483647
        |mclab.lsh.workingDirRoot="PersistIndex"
-       |mclab.insertThreadNum=20
-       |mclab.queryThreadNum=20
+       |mclab.insertThreadNum=10
+       |mclab.queryThreadNum=10
        |mclab.lsh.topK = 10
        |
        |
