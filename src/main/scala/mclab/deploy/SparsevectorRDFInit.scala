@@ -17,7 +17,7 @@ import scala.io.Source
   * initialize the (dataTable, lshTable) for single feature
   * implement the put get method
   */
-private[mclab] object SingleFeatureRDFInit {
+private[mclab] object SparsevectorRDFInit {
   private var createFlag: Boolean = false
   private var tableNum = 0
   private var permutationNum = 0
@@ -85,10 +85,6 @@ private[mclab] object SingleFeatureRDFInit {
         true,
         ramThreshold)
     }
-    val valueSerializer={
-      if(featureDataType == "sparse") Serializers.vectorSerializer
-      else if (featureDataType == "dense") Serializers.densevectorSerializer
-    }
     def initializeIdToVectorMap(): RandomDrawTreeMap[Int, SparseVector] = {
       new RandomDrawTreeMap[Int, SparseVector](
         tableNum,
@@ -129,7 +125,7 @@ private[mclab] object SingleFeatureRDFInit {
     if (LSHServer.lshEngine == null) {
       LSHServer.lshEngine = new LSH(conf)
     }
-    SingleFeatureRDFInit.initializeRDFHashMap(conf)
+    SparsevectorRDFInit.initializeRDFHashMap(conf)
     println("Finish initialize the RDF.")
     val AllSparseVectorsFile = getClass.getClassLoader.getResource(fileName).getFile
     val allDenseVectors = new ListBuffer[Array[Double]]
@@ -138,9 +134,9 @@ private[mclab] object SingleFeatureRDFInit {
       val tmp = Vectors.fromPythonString(line)
       val currentSparseVector = new SparseVector(tmp._1, tmp._2, tmp._3, tmp._4)
       allDenseVectors += tmp._4
-      SingleFeatureRDFInit.vectorIdToVector.put(count, currentSparseVector)
+      SparsevectorRDFInit.vectorIdToVector.put(count, currentSparseVector)
       for (tableID <- 0 until this.tableNum * permutationNum) {
-        SingleFeatureRDFInit.vectorDatabase(tableID).put(count, true)
+        SparsevectorRDFInit.vectorDatabase(tableID).put(count, true)
       }
       count += 1
       if (count % 10000 == 0) {
@@ -162,7 +158,7 @@ private[mclab] object SingleFeatureRDFInit {
   def newMultiThreadFit(fileName: String, conf: Config): Array[Array[Double]] = {
     if (LSHServer.lshEngine == null) LSHServer.lshEngine = new LSH(conf)
     val threadNum = conf.getInt("mclab.insertThreadNum")
-    SingleFeatureRDFInit.initializeRDFHashMap(conf)
+    SparsevectorRDFInit.initializeRDFHashMap(conf)
     println("Finish initialize the RDF.")
     val insertThreadPool: ExecutorService = Executors.newFixedThreadPool(threadNum)
     val AllSparseVectorsFile = getClass.getClassLoader.getResource(fileName).getFile
@@ -173,7 +169,10 @@ private[mclab] object SingleFeatureRDFInit {
       for (line <- Source.fromFile(AllSparseVectorsFile).getLines()) {
         val tmp = Vectors.fromPythonString(line)
         val currentSparseVector = new SparseVector(tmp._1, tmp._2, tmp._3, tmp._4)
+        //Todo :fix the bug that tmp._4 is not include the 0, so it should change, also in transfer,
+        //Todo: make a transfer method in Vector
         allDenseVectors += tmp._4
+//        allDenseVectors += currentSparseVector.toArray
         this.vectorIdToVector.put(vectorId, currentSparseVector)
         try {
           for (i <- 0 until threadNum) {
@@ -265,7 +264,7 @@ private[mclab] object SingleFeatureRDFInit {
   private object InsertTask {
     def insert(id: Int, vector: SparseVector, startTable: Int, endTable: Int): Unit = {
       for (tableID <- startTable until endTable)
-        SingleFeatureRDFInit.vectorDatabase(tableID).put(id, true)
+        SparsevectorRDFInit.vectorDatabase(tableID).put(id, true)
     }
   }
 
@@ -276,14 +275,14 @@ private[mclab] object SingleFeatureRDFInit {
     * @param steps steps in multi parition search
     * @return the similar objects key set in database
     */
-  def querySingleKey(queryKey: Int,sparseVector: SparseVector, steps: Int = 0): Set[AnyRef] = {
+  def querySingleKey(queryKey: Int,sparseVector: SparseVector, steps: Int = 0,L:Int): Set[AnyRef] = {
     //search through all LSHTables
     var finalResultsSet = Set.empty[AnyRef]
     try {
-      val timeA=System.nanoTime()
-      SingleFeatureRDFInit.vectorDatabase.map( x => finalResultsSet=finalResultsSet.union(x.getSimilarWithStepWiseFaster(queryKey,sparseVector,steps).toArray().toSet))
-      val timeB=System.nanoTime()
-      println("Query in vectorDatabase, time is " + (timeB-timeA)/1000000.0 +"ms")
+//      val timeA=System.nanoTime()
+      SparsevectorRDFInit.vectorDatabase.slice(0,L).map(x => finalResultsSet=finalResultsSet.union(x.getSimilarWithStepWiseFaster(queryKey,sparseVector,steps).toArray().toSet))
+//      val timeB=System.nanoTime()
+//      println("Query in vectorDatabase, time is " + (timeB-timeA)/1000000.0 +"ms")
       finalResultsSet
     } catch {
       case ex: NullPointerException => println("need to fit the data first")
@@ -298,10 +297,10 @@ private[mclab] object SingleFeatureRDFInit {
     * @param steps steps in multi parition search
     * @return
     */
-  def queryBatch(queryArray: Array[Int], sparseVectorArray: Array[SparseVector], steps: Int): Array[Set[AnyRef]] = {
+  def queryBatch(queryArray: Array[Int], sparseVectorArray: Array[SparseVector], steps: Int,L:Int=tableNum*permutationNum): Array[Set[AnyRef]] = {
     val resultsArray: ArrayBuffer[Set[AnyRef]] = ArrayBuffer.empty[Set[AnyRef]]
     for (i <- queryArray.indices) {
-      resultsArray += querySingleKey(queryArray(i), sparseVectorArray(i),steps)
+      resultsArray += querySingleKey(queryArray(i), sparseVectorArray(i),steps,L)
     }
     resultsArray.toArray
   }
@@ -405,7 +404,7 @@ private[mclab] object SingleFeatureRDFInit {
         var oneResultsSet = Set.empty[AnyRef]
         try {
           for (tableId <- startTable until endTable) {
-            oneResultsSet = oneResultsSet.union(SingleFeatureRDFInit.vectorDatabase(tableId).getSimilarWithStepWise(queryArray(i), steps).toArray().toSet)
+            oneResultsSet = oneResultsSet.union(SparsevectorRDFInit.vectorDatabase(tableId).getSimilarWithStepWise(queryArray(i), steps).toArray().toSet)
           }
         } catch {
           case ex: NullPointerException => println("need to fit the data first")
@@ -439,10 +438,10 @@ private[mclab] object SingleFeatureRDFInit {
     * Clear the index, delete all objects. And close the engines
     */
   def clearAndClose(): Unit = {
-    SingleFeatureRDFInit.vectorIdToVector.clear()
-    SingleFeatureRDFInit.vectorDatabase.foreach(x => x.clear())
-    SingleFeatureRDFInit.vectorIdToVector.close()
-    SingleFeatureRDFInit.vectorDatabase.foreach(x => x.close())
+    SparsevectorRDFInit.vectorIdToVector.clear()
+    SparsevectorRDFInit.vectorDatabase.foreach(x => x.clear())
+    SparsevectorRDFInit.vectorIdToVector.close()
+    SparsevectorRDFInit.vectorDatabase.foreach(x => x.close())
   }
 
 
@@ -456,11 +455,19 @@ private[mclab] object SingleFeatureRDFInit {
     * @param steps           steps in multi parition search
     * @return (topK,precision)
     */
-  def topKAndPrecisionScore(allDenseVectors: Array[Array[Double]], groundTruth: Array[Set[Int]], conf: Config, steps: Int = 0): (Array[Array[Int]], Double) = {
+  def topKAndPrecisionScore(allDenseVectors: Array[Array[Double]], groundTruth: Array[Set[Int]], conf: Config, steps: Int = 0): (Array[Array[Int]], Double,Long) = {
     val queryArray = groundTruth.indices.toArray
     var averageScore = 0.0
     val allQueryedTopK = new ArrayBuffer[Array[Int]]
-    val resultsSet = this.NewMultiThreadQueryBatch(queryArray, steps, conf.getInt("mclab.queryThreadNum"))
+    val queryNum=groundTruth.length
+    val sv:Array[SparseVector]=new Array(queryNum)
+    val dim=allDenseVectors(0).length
+//    val indices=new Array[Int]()
+    for(i <- 0 until queryNum){sv(i)=Vectors.sparse(i,dim,Array.range(0,dim),allDenseVectors(i)).asInstanceOf[SparseVector]}
+//    val resultsSet = this.NewMultiThreadQueryBatch(queryArray, steps, conf.getInt("mclab.queryThreadNum"))
+    val timeA = System.currentTimeMillis()
+    val resultsSet = this.query(queryArray, sv, steps, conf.getInt("mclab.queryThreadNum"))
+    val timeB = System.currentTimeMillis()
     for (i <- resultsSet.indices) {
       var score = 0.0
       if (resultsSet(i) != Set.empty[AnyRef]) {
@@ -490,12 +497,13 @@ private[mclab] object SingleFeatureRDFInit {
         averageScore += score / queryArray.length
       }
     }
-    (allQueryedTopK.toArray, averageScore / conf.getInt("mclab.lsh.topK"))
+    (allQueryedTopK.toArray, averageScore / conf.getInt("mclab.lsh.topK"),timeB-timeA)
   }
 
 
   /**
     * get the dataTable and hashTable average distribution of number of objects in different sub-index
+ *
     * @return
     */
   def getDtAndHtNumDistribution(): (Array[Double], Array[Double]) = {
@@ -518,7 +526,7 @@ private[mclab] object SingleFeatureRDFInit {
   /**
     *
     */
-  def query(queryKeyArray: Array[Int], querySVArray:Array[SparseVector], steps: Int = 0, queryThreadNum: Int = 5): Array[Set[AnyRef]] = {
+  def query(queryKeyArray: Array[Int], querySVArray:Array[SparseVector], steps: Int = 0, queryThreadNum: Int = 10): Array[Set[AnyRef]] = {
     var flagQuery = true
     this.resultsArray = new Array[Set[AnyRef]](queryKeyArray.length)
     for (i <- resultsArray.indices) {
@@ -563,7 +571,7 @@ private[mclab] object SingleFeatureRDFInit {
         var oneResultsSet = Set.empty[AnyRef]
         try {
           for (tableId <- startTable until endTable) {
-            oneResultsSet = oneResultsSet.union(SingleFeatureRDFInit.vectorDatabase(tableId).getSimilarWithStepWiseFaster(queryArray(i), querySVArray(i),steps).toArray().toSet)
+            oneResultsSet = oneResultsSet.union(SparsevectorRDFInit.vectorDatabase(tableId).getSimilarWithStepWiseFaster(queryArray(i), querySVArray(i),steps).toArray().toSet)
           }
         } catch {
           case ex: NullPointerException => println("need to fit the data first")

@@ -16,7 +16,7 @@ import scala.io.Source
   * initialize the (dataTable, lshTable) for single feature
   * implement the put get method
   */
-private[mclab] object DenseTestInit {
+private[mclab] object DensevectorRDFInit {
   private var createFlag: Boolean = false
   private var tableNum = 0
   private var permutationNum = 0
@@ -124,19 +124,19 @@ private[mclab] object DenseTestInit {
     * @param conf     configuration
     * @return the array of all denseVector in dataTable
     */
-  def newFastFit(fileName: String, conf: Config): Array[Array[Double]] = {
+  def newFastFit(fileName: String, conf: Config): Array[DenseVector] = {
     if (LSHServer.lshEngine == null) {
       LSHServer.lshEngine = new LSH(conf)
     }
     this.initializeRDFHashMap(conf)
     println("Finish initialize the RDF.")
     val AllDenseVectorsFile = getClass.getClassLoader.getResource(fileName).getFile
-    val allDenseVectors = new ListBuffer[Array[Double]]
+    val allDenseVectors = new ListBuffer[DenseVector]
     var count = 0
     for (line <- Source.fromFile(AllDenseVectorsFile).getLines()) {
       val tmp = Vectors.parseDense(line)
       val currentDenseVector = new DenseVector(tmp._1,tmp._2)
-      allDenseVectors += tmp._2
+      allDenseVectors += currentDenseVector
       this.vectorIdToVector.put(count, currentDenseVector)
       for (tableID <- 0 until this.tableNum * permutationNum) {
         this.vectorDatabase(tableID).put(count, true)
@@ -160,11 +160,12 @@ private[mclab] object DenseTestInit {
     */
   def newMultiThreadFit(fileName: String, conf: Config): Array[DenseVector] = {
     if (LSHServer.lshEngine == null) LSHServer.lshEngine = new LSH(conf)
-    val threadNum = if (conf.getInt("mclab.insertThreadNum") > tableNum){
-      tableNum
-    }else{
-      conf.getInt("mclab.insertThreadNum")
-    }
+//    val threadNum = if (conf.getInt("mclab.insertThreadNum") > tableNum){
+//      tableNum
+//    }else{
+//      conf.getInt("mclab.insertThreadNum")
+//    }
+    val threadNum=conf.getInt("mclab.insertThreadNum")
     this.initializeRDFHashMap(conf)
     println("Finish initialize the RDF.")
     val insertThreadPool: ExecutorService = Executors.newFixedThreadPool(threadNum)
@@ -191,8 +192,9 @@ private[mclab] object DenseTestInit {
           println(vectorId + " objects loaded")
         }
       }
+    }finally {
+      insertThreadPool.shutdown()
     }
-    insertThreadPool.shutdown()
     while (flag) {
       if (insertThreadPool.isTerminated) {
         flag = false
@@ -200,7 +202,7 @@ private[mclab] object DenseTestInit {
       Thread.sleep(5)
     }
     println("finish load, dataTable totally has " + vectorIdToVector.size() + " objects.")
-    allDenseVectors
+    allDenseVectors.toArray
   }
 
   /**
@@ -268,7 +270,7 @@ private[mclab] object DenseTestInit {
   private object InsertTask {
     def insert(id: Int, vector: DenseVector, startTable: Int, endTable: Int): Unit = {
       for (tableID <- startTable until endTable)
-        DenseTestInit.vectorDatabase(tableID).put(id, true)
+        DensevectorRDFInit.vectorDatabase(tableID).put(id, true)
     }
   }
 
@@ -279,14 +281,19 @@ private[mclab] object DenseTestInit {
     * @param steps steps in multi parition search
     * @return the similar objects key set in database
     */
-  def querySingleKey(queryKey: Int, denseVector: DenseVector,steps: Int = 0): Set[AnyRef] = {
+  def querySingleKey(queryKey: Int, denseVector: DenseVector,steps: Int = 0,L:Int=tableNum*permutationNum): Set[AnyRef] = {
     //search through all LSHTables
     var finalResultsSet = Set.empty[AnyRef]
     try {
-        val timeA=System.nanoTime()
-        this.vectorDatabase.map( x => finalResultsSet=finalResultsSet.union(x.getSimilarWithStepWiseFaster(queryKey,denseVector,steps).toArray().toSet))
-        val timeB=System.nanoTime()
-        println("Query in vectorDatabase, time is " + (timeB-timeA)/1000000.0 +"ms")
+
+        this.vectorDatabase.slice(0,L).map( x => finalResultsSet=finalResultsSet.union(x.getSimilarWithStepWiseFaster(queryKey,denseVector,steps).toArray().toSet))
+//        for (i <- DenseTestInit.vectorDatabase.slice(0,L).indices){
+//          val timeA=System.nanoTime()
+//          val SingleLSHTableResults=DenseTestInit.vectorDatabase(i).getSimilarWithStepWiseFaster(queryKey,denseVector,steps).toArray().toSet
+//          finalResultsSet=finalResultsSet.union(SingleLSHTableResults)
+//          val timeB=System.nanoTime()
+//          println("Query in vectorDatabase "+ i +", time is " + (timeB-timeA)/1000000.0 +"ms")
+//        }
         finalResultsSet
     } catch {
       case ex: NullPointerException => println("need to fit the data first")
@@ -301,10 +308,10 @@ private[mclab] object DenseTestInit {
     * @param steps steps in multi parition search
     * @return
     */
-  def queryBatch(queryArray: Array[Int], denseVectorArray:Array[DenseVector],steps: Int): Array[Set[AnyRef]] = {
+  def queryBatch(queryArray: Array[Int], denseVectorArray:Array[DenseVector],steps: Int,L:Int): Array[Set[AnyRef]] = {
     val resultsArray: ArrayBuffer[Set[AnyRef]] = ArrayBuffer.empty[Set[AnyRef]]
     for (i <- queryArray.indices) {
-      resultsArray += querySingleKey(queryArray(i), denseVectorArray(i), steps)
+      resultsArray += querySingleKey(queryArray(i), denseVectorArray(i), steps,L)
     }
     resultsArray.toArray
   }
@@ -325,7 +332,7 @@ private[mclab] object DenseTestInit {
     * @param steps          steps in multi parition search
     * @return the similar objects (is the keys array, which save in dataTable)
     */
-  def NewMultiThreadQueryBatch(queryArray: Array[Int], steps: Int = 0, queryThreadNum: Int = 5): Array[Set[AnyRef]] = {
+  def NewMultiThreadQueryBatch(queryArray: Array[Int],denseVectorArray:Array[DenseVector],steps: Int = 0, queryThreadNum: Int = 5): Array[Set[AnyRef]] = {
     var flagQuery = true
     this.resultsArray = new Array[Set[AnyRef]](queryArray.length)
     for (i <- resultsArray.indices) {
@@ -336,6 +343,7 @@ private[mclab] object DenseTestInit {
     try {
       for (i <- 0 until queryThreadNum) {
         queryThreadPool.execute(new threadQuery(queryArray,
+          denseVectorArray,
           i * this.tableNum * this.permutationNum / queryThreadNum,
           (i + 1) * this.tableNum * this.permutationNum / queryThreadNum,
           steps))
@@ -374,6 +382,7 @@ private[mclab] object DenseTestInit {
     try {
       for (i <- 0 until queryThreadNum) {
         queryThreadPool.execute(new threadQuery(queryArray,
+          querySVArray,
           i * this.tableNum * this.permutationNum / queryThreadNum,
           (i + 1) * this.tableNum * this.permutationNum / queryThreadNum,
           steps))
@@ -390,10 +399,10 @@ private[mclab] object DenseTestInit {
   }
 
 
-  private class threadQuery(queryArray: Array[Int], startTable: Int, endTable: Int, steps: Int = 0)
+  private class threadQuery(queryArray: Array[Int],denseVectorArray: Array[DenseVector], startTable: Int, endTable: Int, steps: Int = 0)
     extends Runnable {
     override def run(): Unit = {
-      QueryTask.query(queryArray, startTable, endTable, steps)
+      QueryTask.query(queryArray,denseVectorArray, startTable, endTable, steps)
     }
   }
 
@@ -403,12 +412,12 @@ private[mclab] object DenseTestInit {
     * 2.if the result set is alreay exit in resultArray, do union operation, otherwise append a new one.
     */
   private object QueryTask {
-    def query(queryArray: Array[Int], startTable: Int, endTable: Int, steps: Int = 0): Unit = {
+    def query(queryArray: Array[Int],denseVectorArray: Array[DenseVector], startTable: Int, endTable: Int, steps: Int = 0): Unit = {
       for (i <- queryArray.indices) {
         var oneResultsSet = Set.empty[AnyRef]
         try {
           for (tableId <- startTable until endTable) {
-            oneResultsSet = oneResultsSet.union(DenseTestInit.vectorDatabase(tableId).getSimilarWithStepWise(queryArray(i), steps).toArray().toSet)
+            oneResultsSet = oneResultsSet.union(DensevectorRDFInit.vectorDatabase(tableId).getSimilarWithStepWiseFaster(queryArray(i),denseVectorArray(i), steps).toArray().toSet)
           }
         } catch {
           case ex: NullPointerException => println("need to fit the data first")
@@ -459,20 +468,21 @@ private[mclab] object DenseTestInit {
     * @param steps           steps in multi parition search
     * @return (topK,precision)
     */
-  def topKAndPrecisionScore(allDenseVectors: Array[Array[Double]], groundTruth: Array[Set[Int]], conf: Config, steps: Int = 0): (Array[Array[Int]], Double) = {
+  //todo: send the threadpool through parameter
+  def topKAndPrecisionScore(allDenseVectors: Array[DenseVector], groundTruth: Array[Set[Int]], conf: Config, steps: Int = 0,queryThreadPool:ExecutorService): (Array[Array[Int]], Double) = {
     val queryArray = groundTruth.indices.toArray
     var averageScore = 0.0
     val allQueryedTopK = new ArrayBuffer[Array[Int]]
-    val resultsSet = this.NewMultiThreadQueryBatch(queryArray, steps, conf.getInt("mclab.queryThreadNum"))
+    val resultsSet = this.query(queryArray, allDenseVectors.slice(0,groundTruth.length),steps, conf.getInt("mclab.queryThreadNum"),queryThreadPool)
     for (i <- resultsSet.indices) {
       var score = 0.0
       if (resultsSet(i) != Set.empty[AnyRef]) {
         val resultSetForOneQuery = resultsSet(i).toArray
-        val queryDenseVector: Array[Double] = allDenseVectors(i)
+        val queryDenseVector: Array[Double] = allDenseVectors(i).toArray
         val dataSetMatirx: ArrayBuffer[Array[Double]] = new ArrayBuffer[Array[Double]]
         //        println("size=" + resultSetForOneQuery.length)
         for (j <- resultSetForOneQuery.indices) {
-          dataSetMatirx += allDenseVectors(resultSetForOneQuery(j).toString.toInt)
+          dataSetMatirx += allDenseVectors(resultSetForOneQuery(j).toString.toInt).toArray
         }
         val dv1 = breeze.linalg.DenseVector(queryDenseVector: _*)
         val dv2 = breeze.linalg.DenseMatrix(dataSetMatirx: _*)
@@ -499,6 +509,7 @@ private[mclab] object DenseTestInit {
 
   /**
     * get the dataTable and hashTable average distribution of number of objects in different sub-index
+    *
     * @return
     */
   def getDtAndHtNumDistribution(): (Array[Double], Array[Double]) = {
@@ -513,8 +524,70 @@ private[mclab] object DenseTestInit {
         val tmp=oneHt.allSubIndexObjectsNumberDistribution()
         for(i <- 0 until tmp.size()){htDistribution(i) += tmp.get(i)}
       }
-      htDistribution=htDistribution.map(x => x/this.tableNum)
+      htDistribution=htDistribution.map(x => x/(this.tableNum*this.permutationNum))
     }
     (dtDistribution, htDistribution)
   }
+
+
+  def query(queryKeyArray: Array[Int], querySVArray:Array[DenseVector], steps: Int = 0, queryThreadNum: Int = 10,queryThreadPool:ExecutorService): Array[Set[AnyRef]] = {
+    var flagQuery = true
+    this.resultsArray = new Array[Set[AnyRef]](queryKeyArray.length)
+    for (i <- resultsArray.indices) {
+      resultsArray(i) = Set()
+    }
+//    val queryThreadPool: ExecutorService = Executors.newFixedThreadPool(queryThreadNum)
+    //Todo multiThread, remember to add synchronized on union result operation...
+    try {
+      for (i <- 0 until queryThreadNum) {
+        queryThreadPool.execute(new threadQueryNew(queryKeyArray, querySVArray,
+          i * this.tableNum * this.permutationNum / queryThreadNum,
+          (i + 1) * this.tableNum * this.permutationNum / queryThreadNum,
+          steps))
+      }
+    }
+    queryThreadPool.shutdown()
+    while (flagQuery) {
+      if (queryThreadPool.isTerminated) {
+        flagQuery = false
+      }
+      Thread.sleep(5)
+    }
+    resultsArray
+  }
+
+
+  private class threadQueryNew(queryArray: Array[Int], querySVArray:Array[DenseVector], startTable: Int, endTable: Int, steps: Int = 0)
+    extends Runnable {
+    override def run(): Unit = {
+      QueryTaskNew.query(queryArray, querySVArray,startTable, endTable, steps)
+    }
+  }
+
+  /**
+    * the query task
+    * Steps: 1.search the tables from startTable to endTable to get the resultset for each query key
+    * 2.if the result set is alreay exit in resultArray, do union operation, otherwise append a new one.
+    */
+  private object QueryTaskNew {
+    def query(queryArray: Array[Int], querySVArray:Array[DenseVector],startTable: Int, endTable: Int, steps: Int = 0): Unit = {
+      for (i <- queryArray.indices) {
+        var oneResultsSet = Set.empty[AnyRef]
+        try {
+          for (tableId <- startTable until endTable) {
+            oneResultsSet = oneResultsSet.union(DensevectorRDFInit.vectorDatabase(tableId).getSimilarWithStepWiseFaster(queryArray(i), querySVArray(i),steps).toArray().toSet)
+          }
+        } catch {
+          case ex: NullPointerException => println("need to fit the data first")
+        }
+        //better way to achieve multi-Thread
+        this.synchronized {
+          if (oneResultsSet != null)
+            resultsArray(i) = resultsArray(i).union(oneResultsSet)
+        }
+      }
+    }
+  }
+
+
 }

@@ -16,6 +16,7 @@ import scala.language.postfixOps
 /**
   * initialize the Tables(mainTable,LSHTable)
   */
+@Deprecated
 private[mclab] object HashTableInit {
   var createFlag:Boolean=false
   private var tableNum=0
