@@ -2,6 +2,8 @@
 
 This repository is the official implementation of Dynamic Partition Forest: An Efficient and Distributed Indexing Scheme for Similarity Search based on Hashing.
 
+![Alt text](https://github.com/MacLLL/SimilaritySearchByRDF/blob/master/framework.png)
+
 The similarity search over large-scale feature-rich data(e.g. image, video or text) is a fundamental problem and has become increasingly important in data mining research. Hashing based methods, especially Locality Sensitive Hashing(LSH), have been widely used for fast Approximate Nearest Neighbor search(ANNs). However, there are still two flaws in existing methods: (1) The state-of-the-art distribution scheme sacrificed too much accuracy for speeding up the query in practice. (2) Most LSH-based index approaches directly used the static number of compound hash values without considering the data distribution, resulting in system performance degradation. In this paper, a new index structure called Dynamic Partition Forest(DPF) is designed to hierarchically divide the high collision areas with dynamic hashing, which leads itself to auto-adapt various data distributions. A multiple-step search strategy is integrated with DPF to mitigate the accuracy loss with distributed scheme. The experiment results show that DPF increases the accuracy by 3% to 5% within the same timeframe compared to DPF without multiple-step search. Additionally, DPF with our partition scheme is 1.4 times faster than DPF without partition, which demonstrates the efficiency of our content-based distributed scheme. Experimental comparisons with other two state-of-the-art methods on three popular datasets show that DPF is 3.2 to 9 times faster to achieve the same accuracy with 17% to 78% decrease of index space.
 
 ## Requirements
@@ -41,3 +43,7 @@ test("simple test"){
 ```
 
 The results array contains the all result for each query objects. More test is given in the `test.scala.mclab.Experiments.TestSingleRDFSuite.scala`. 
+
+## Results
+
+
