@@ -48,3 +48,27 @@ The results array contains the all result for each query objects. More test is g
 
 ![Alt text](https://github.com/MacLLL/SimilaritySearchByRDF/blob/master/results.png)
 
+## Papers
+
+If you find the code useful in your research, please consider citing our paper:
+```
+@inproceedings{lu2018dynamic,
+  title={Dynamic Partition Forest: An Efficient and Distributed Indexing Scheme for Similarity Search based on Hashing},
+  author={Lu, Yangdi and Bo, Yang and He, Wenbo and Nabatchian, Amir},
+  booktitle={2018 IEEE International Conference on Big Data (Big Data)},
+  pages={1059--1064},
+  year={2018},
+  organization={IEEE}
+}
+```
+
+```
+@inproceedings{lu2018random,
+  title={Random draw forest: A salient index for similarity search over multimedia data},
+  author={Lu, Yangdi and He, Wenbo and Nabatchian, Amir},
+  booktitle={2018 IEEE Fourth International Conference on Multimedia Big Data (BigMM)},
+  pages={1--5},
+  year={2018},
+  organization={IEEE}
+}
+```
