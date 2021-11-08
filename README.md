@@ -46,4 +46,5 @@ The results array contains the all result for each query objects. More test is g
 
 ## Results
 
+![Alt text](https://github.com/MacLLL/SimilaritySearchByRDF/blob/master/results.png)
 
